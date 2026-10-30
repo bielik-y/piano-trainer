@@ -28,6 +28,8 @@ pnpm-монорепо + Turborepo. Пакеты `@piano/*`.
 - Внутренние пакеты подключаются из исходников (`exports` → `src/index.ts`), без шага сборки.
 - `nodeLinker: hoisted` в `pnpm-workspace.yaml` нужен для Metro, не меняй его.
 - UI-тексты и документация на русском, идентификаторы в коде на английском.
+- Коммиты по [Conventional Commits](https://www.conventionalcommits.org/ru/v1.0.0/): `<type>(<scope>): <описание>`. Тип и scope на английском (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`; scope — имя приложения или пакета без `@piano/`: `mobile`, `api`, `score-core`, `omr-worker`, `roadmap` и т. п.), описание на русском, в повелительном наклонении, без точки в конце. Ломающие изменения помечаются `!` после типа или scope.
+- Автор коммитов задан в локальном конфиге репозитория (`git config user.name/user.email`), глобальный конфиг для этого проекта не используется.
 
 ## Команды
 
