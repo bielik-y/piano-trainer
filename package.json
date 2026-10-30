@@ -1,0 +1,22 @@
+{
+  "name": "piano-trainer",
+  "private": true,
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev:mobile": "node scripts/start-mobile.mjs",
+    "dev:api": "pnpm --filter @piano/api start:dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.10",
+    "typescript": "~6.0.3"
+  }
+}

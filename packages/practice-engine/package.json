@@ -1,0 +1,18 @@
+{
+  "name": "@piano/practice-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": { "@piano/score-core": "workspace:*" },
+  "devDependencies": {
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.2"
+  }
+}
