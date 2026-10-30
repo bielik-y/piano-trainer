@@ -14,7 +14,7 @@
 - ✅ `services/omr-worker` (Python), `infra/docker-compose.yml`
 - ✅ `pnpm install` + `pnpm typecheck` + `pnpm test` проходят (Windows, Node 26, pnpm 12)
 - ⬜ GitHub Actions: lint, typecheck и test
-- ⬜ Remote-репозиторий на GitHub
+- ✅ Remote-репозиторий на GitHub: [bielik-y/piano-trainer](https://github.com/bielik-y/piano-trainer)
 
 ## Фаза 1. Спайк технических рисков ⬜ (самое важное, 1–2 недели)
 
