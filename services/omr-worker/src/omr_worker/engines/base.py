@@ -1,4 +1,4 @@
-"""Абстракция движка распознавания: oemer, Audiveris и т. п. См. docs/ARCHITECTURE.md §7."""
+"""Абстракция движка распознавания: homr (выбран), Audiveris, oemer. См. docs/ARCHITECTURE.md §7."""
 
 from dataclasses import dataclass
 from pathlib import Path

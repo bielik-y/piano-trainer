@@ -1,0 +1,72 @@
+# Набор для бенчмарка движков OMR. Сами файлы лежат в bench/data/ (не в git).
+#
+# source — путь относительно bench/data/. PDF разворачивается в отдельные страницы (<id>-p<N>),
+#          skip_pages — страницы, которые не участвуют (например, пустые нотоносцы).
+# truth:
+#   reference: <имя> — точный эталон bench/data/reference/<имя>.musicxml;
+#                      для PDF страница берётся из номера страницы, для фото задаётся page.
+#   manual           — эталона нет, неверные такты отмечаются вручную (bench/review.py).
+# kind: pdf | photo — категории считаются отдельно, у каждой свой победитель.
+
+items:
+  # Эталонные пьесы: Humdrum из KernScores (craigsapp/*), PDF отрендерен Verovio (prepare_reference.py).
+  - id: chopin-e-minor
+    kind: pdf
+    source: reference/chopin-prelude-e-minor.pdf
+    truth: {reference: chopin-prelude-e-minor}
+    notes: Шопен, прелюдия op. 28 № 4 — аккорды в левой руке
+  - id: mozart-k545
+    kind: pdf
+    source: reference/mozart-k545-1.pdf
+    truth: {reference: mozart-k545-1}
+    notes: Моцарт, соната K. 545, ч. 1 — гаммы, альбертиевы басы, трели
+  - id: joplin-entertainer
+    kind: pdf
+    source: reference/joplin-entertainer.pdf
+    truth: {reference: joplin-entertainer}
+    notes: Джоплин, The Entertainer — синкопы, октавы, лиги
+
+  # Снимки экрана с первой страницей Моцарта: фото с точным эталоном.
+  - id: screen-mozart-1
+    kind: photo
+    source: user/screen-mozart-1.jpg
+    truth: {reference: mozart-k545-1, page: 1}
+    notes: экран ноутбука, ровно; 960×1280 (сжато мессенджером)
+  - id: screen-mozart-2
+    kind: photo
+    source: user/screen-mozart-2.jpg
+    truth: {reference: mozart-k545-1, page: 1}
+    notes: экран ноутбука, под углом; 960×1280 (сжато мессенджером)
+
+  # Ноты пользователя: эталона нет, сверка вручную.
+  - id: two-of-us
+    kind: pdf
+    source: user/Sheets Just The Two Of Us.pdf
+    truth: manual
+    skip_pages: [5]  # пустые нотоносцы без нот
+    notes: аранжировка из интернета, системы вставлены картинками ~140 dpi
+  - id: friend-in-me
+    kind: pdf
+    source: user/Sheets You've Got A Friend In Me.pdf
+    truth: manual
+    notes: аранжировка из интернета, системы вставлены картинками
+  - id: bohemian-1
+    kind: photo
+    source: user/Bohemian Rapsody 1.jpg
+    truth: manual
+    notes: фото бумаги, 960×1280 (сжато мессенджером)
+  - id: bohemian-2
+    kind: photo
+    source: user/Bohemian Rapsody 2.jpg
+    truth: manual
+    notes: фото бумаги, 960×1280 (сжато мессенджером)
+  - id: tiktok-1
+    kind: photo
+    source: user/TikTok 1.jpg
+    truth: manual
+    notes: фото, 947×1280
+  - id: tiktok-2
+    kind: photo
+    source: user/TikTok 2.jpg
+    truth: manual
+    notes: фото, 950×1280

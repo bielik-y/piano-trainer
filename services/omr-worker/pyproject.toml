@@ -1,19 +1,21 @@
 [project]
 name = "omr-worker"
 version = "0.0.1"
-description = "OMR worker: PDF/фото нот → MusicXML + bbox тактов"
-requires-python = ">=3.11,<3.13"  # oemer/onnxruntime: проверить совместимость перед повышением
+description = "OMR worker: PDF/фото нот → MusicXML"
+requires-python = ">=3.11,<3.13"  # homr/onnxruntime: проверить совместимость перед повышением
 dependencies = [
     "bullmq",
     "boto3",
     "pydantic>=2",
     "pymupdf",
     "opencv-python-headless",
-    # "oemer",  # подключается в фазе 7, тянет onnxruntime
+    # "homr",  # подключается в фазе 7; в бенчмарке живёт в своём окружении bench/envs/homr
 ]
 
 [dependency-groups]
 dev = ["pytest", "ruff"]
+# Бенчмарк движков OMR (bench/), в прод-образ не попадает. Сами движки живут в своих venv.
+bench = ["verovio", "resvg-py", "music21", "musicdiff", "pyyaml", "psutil"]
 
 [build-system]
 requires = ["hatchling"]
@@ -24,3 +26,6 @@ packages = ["src/omr_worker"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]

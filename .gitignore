@@ -12,3 +12,8 @@ __pycache__/
 .venv/
 *.pyc
 .pytest_cache/
+
+# OMR-бенчмарк: ноты, фото и результаты распознавания не коммитим
+services/omr-worker/bench/data/
+services/omr-worker/bench/out/
+services/omr-worker/bench/envs/
