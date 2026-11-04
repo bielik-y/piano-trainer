@@ -8,6 +8,7 @@
   "scripts": {
     "dev:mobile": "node scripts/start-mobile.mjs",
     "dev:api": "pnpm --filter @piano/api start:dev",
+    "dev:omr-worker": "node scripts/start-omr-worker.mjs",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
