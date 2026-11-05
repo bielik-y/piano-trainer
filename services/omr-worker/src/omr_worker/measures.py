@@ -24,6 +24,10 @@ NoteKey = tuple[int, Fraction, int, Fraction, bool, bool]
 
 REASONS = ("missing_on_staff", "empty", "no_time_signature", "overflow", "duration_mismatch")
 
+# Вычисление размера: сколько тактов нужно для вывода и какую долю должна занять самая частая длина.
+MIN_MEASURES_TO_INFER = 4
+MIN_SHARE_TO_INFER = 0.6
+
 
 @dataclass
 class Measure:
@@ -145,6 +149,40 @@ def check_measures(
                 if length > expected or (length < expected and not may_be_short):
                     issues[index] = ["duration_mismatch"]
     return issues
+
+
+def infer_time_signature(measures: list[Measure]) -> tuple[int, int] | None:
+    """Размер по длинам тактов: (доли, длительность доли) или None, если вывод ненадёжен.
+
+    Длина такта — самый длинный его голос, поэтому короткий дополнительный голос не мешает.
+    Первый и последний такты не считаются: там бывают затакт и неполный финал.
+    По длине не отличить 3/4 от 6/8, выбирается размер с простой долей."""
+    lengths = [
+        length
+        for measure in measures[1:-1]
+        if (length := _longest_voice(measure)) > 0
+    ]
+    if len(lengths) < MIN_MEASURES_TO_INFER:
+        return None
+    length, count = Counter(lengths).most_common(1)[0]
+    if count / len(lengths) < MIN_SHARE_TO_INFER:
+        return None
+    return _signature_for_length(length)
+
+
+def _longest_voice(measure: Measure) -> Fraction:
+    return max(
+        (length for staff in measure.voice_lengths for length in staff or []),
+        default=Fraction(0),
+    )
+
+
+def _signature_for_length(length: Fraction) -> tuple[int, int] | None:
+    beat_type = 4 * length.denominator
+    if beat_type > 16:
+        return None  # 1/3 четверти и т. п.: это сбой длительностей, а не размер
+    beats = int(length * beat_type / 4)
+    return (beats, beat_type) if beats <= 12 else None
 
 
 def flag_measures(

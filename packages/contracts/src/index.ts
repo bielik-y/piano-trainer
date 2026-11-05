@@ -74,8 +74,16 @@ export const OmrReport = z.object({
   quality: z.enum(['ok', 'low']),
   staffCount: z.number().int().nonnegative(),
   timeSignature: z.string().nullable(),
+  /** engine — знак размера нашёл движок, inferred — вычислен по длинам тактов (предположение). */
+  timeSignatureSource: z.enum(['engine', 'inferred']).nullable().default(null),
   /** Знаки при ключе: > 0 — диезы, < 0 — бемоли. */
   keyFifths: z.number().int().nullable(),
+  title: z.string().nullable().default(null),
+  composer: z.string().nullable().default(null),
+  /** Темп словами, как напечатан: Allegro, Moderately. */
+  tempoText: z.string().nullable().default(null),
+  /** Темп числом; значок ноты не читается, долей считается четверть. */
+  tempoBpm: z.number().int().positive().nullable().default(null),
   suspiciousMeasures: z.array(SuspiciousMeasure),
   engine: z.object({ name: z.string(), version: z.string().nullable() }),
 });

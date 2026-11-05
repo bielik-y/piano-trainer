@@ -250,9 +250,15 @@ function showStatus(job) {
 function showQuality(result) {
   $('quality').hidden = !result;
   if (!result) return;
+  const tempo = [result.tempoText, result.tempoBpm && `♩ = ${result.tempoBpm}`].filter(Boolean).join(', ');
   const rows = [
+    ['Название', result.title ?? 'не найдено'],
+    ['Автор', result.composer ?? 'не найден'],
+    ['Темп', tempo || 'не найден'],
     ['Нормальных тактов', `${result.okMeasureCount} из ${result.measureCount} (${Math.round(result.okRatio * 100)} %)`],
-    ['Размер', result.timeSignature ?? 'не определён'],
+    ['Размер', result.timeSignature
+      ? result.timeSignature + (result.timeSignatureSource === 'inferred' ? ' (вычислен, предположение)' : '')
+      : 'не определён'],
     ['Знаки при ключе', result.keyFifths == null ? '—' : formatKey(result.keyFifths)],
     ['Нотоносцев', result.staffCount],
   ];

@@ -22,8 +22,9 @@ import music21 as m21
 
 from .empty_staves import remove_empty_systems
 from .engines.cli import EngineCancelled, EngineError, EngineNoMusic, EngineTimeout
-from .measures import check_measures, measures_from_score, parse_score
-from .merge import merge_pages, page_of_measure
+from .measures import check_measures, infer_time_signature, measures_from_score, parse_score
+from .merge import merge_pages, page_of_measure, set_score_info, set_time_signature
+from .metadata import ScoreInfo, read_score_info
 from .models import (
     Cancelled,
     EngineInfo,
@@ -33,7 +34,7 @@ from .models import (
     Report,
     SuspiciousMeasure,
 )
-from .preprocess import image_size, prepare_pages
+from .preprocess import image_size, is_pdf, prepare_pages
 
 log = logging.getLogger(__name__)
 
@@ -192,6 +193,16 @@ def run_pipeline(
     measures = measures_from_score(score)
     if not measures or not any(m.has_events for m in measures):
         raise OmrFailure("no_music_found", "На страницах не найдено нот")
+    info = _read_info(sources, images, documents)
+    music_xml_text = set_score_info(merged.music_xml, info)
+    time_signature_source = "engine" if _first_time_signature(score) else None
+    if time_signature_source is None:
+        inferred = infer_time_signature(measures)
+        if inferred is not None:
+            music_xml_text = set_time_signature(music_xml_text, *inferred)
+            score = parse_score(music_xml_text)
+            measures = measures_from_score(score)
+            time_signature_source = "inferred"
     issues = check_measures(measures)
     ok_count = len(measures) - len(issues)
     ok_ratio = round(ok_count / len(measures), 4)
@@ -204,7 +215,12 @@ def run_pipeline(
         quality="ok" if ok_ratio >= min_ok_ratio else "low",
         staff_count=len(score.parts),
         time_signature=_first_time_signature(score),
+        time_signature_source=time_signature_source,
         key_fifths=_first_key(score),
+        title=info.title,
+        composer=info.composer,
+        tempo_text=info.tempo_text,
+        tempo_bpm=info.tempo_bpm,
         suspicious_measures=[
             SuspiciousMeasure(
                 index=index,
@@ -218,7 +234,7 @@ def run_pipeline(
     )
 
     music_xml = job_dir / "result.musicxml"
-    music_xml.write_text(merged.music_xml, encoding="utf-8")
+    music_xml.write_text(music_xml_text, encoding="utf-8")
     report_path = job_dir / "report.json"
     report_path.write_text(
         json.dumps(
@@ -227,6 +243,19 @@ def run_pipeline(
         encoding="utf-8",
     )
     return PipelineOutput(report=report, pages=pages, music_xml=music_xml, report_path=report_path)
+
+
+def _read_info(
+    sources: list[Path], images: list[Path], documents: list[str | None]
+) -> ScoreInfo:
+    """Сбой чтения названия и темпа не должен ронять задачу: без них ноты всё равно есть."""
+    index = next(i for i, doc in enumerate(documents) if doc is not None)
+    pdf = sources[0] if len(sources) == 1 and is_pdf(sources[0]) else None
+    try:
+        return read_score_info(images[index], pdf, index)
+    except Exception:
+        log.warning("Не удалось прочитать название и темп", exc_info=True)
+        return ScoreInfo()
 
 
 def _percent(start: int, end: int, done: int, total: int) -> int:

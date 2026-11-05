@@ -74,6 +74,17 @@ def remove_empty_systems(path: Path) -> CleanResult:
     return CleanResult(removed=len(empty), blank=not left.any())
 
 
+def first_system_bounds(path: Path) -> tuple[float, float] | None:
+    """Верх и низ первой системы в долях высоты страницы; None — нотоносцы не разобрать."""
+    with Image.open(path) as image:
+        ink = np.asarray(image.convert("L")) < 128
+    systems = _group_systems(_find_staves(ink), ink)
+    if not systems:
+        return None
+    height = ink.shape[0]
+    return systems[0][0].top / height, systems[0][-1].bottom / height
+
+
 def _find_staves(ink: np.ndarray) -> list[Staff]:
     rows = ink.sum(axis=1) > ink.shape[1] * LINE_MIN_WIDTH
     lines: list[tuple[int, int]] = []

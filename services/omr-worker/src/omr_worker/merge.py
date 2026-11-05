@@ -9,6 +9,8 @@ homr распознаёт каждую страницу отдельно и вы
 from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
+from .metadata import ScoreInfo
+
 
 @dataclass(frozen=True)
 class MergedScore:
@@ -46,6 +48,85 @@ def merge_pages(documents: list[str]) -> MergedScore:
             measure.set("number", str(number))
     xml = ET.tostring(base, encoding="unicode", xml_declaration=True)
     return MergedScore(music_xml=xml, measures_per_page=counts)
+
+
+def set_score_info(music_xml: str, info: ScoreInfo) -> str:
+    """Записывает название, автора и темп; то, что написал движок, заменяется."""
+    root = ET.fromstring(music_xml.encode("utf-8"))
+    work = root.find("work")
+    if work is not None:
+        root.remove(work)
+    if info.title:
+        work = ET.Element("work")
+        ET.SubElement(work, "work-title").text = info.title
+        root.insert(0, work)
+    if info.composer:
+        _set_composer(root, info.composer)
+    if info.tempo_text or info.tempo_bpm:
+        _add_tempo(root, info.tempo_text, info.tempo_bpm)
+    return ET.tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def _set_composer(root: ET.Element, composer: str) -> None:
+    identification = root.find("identification")
+    if identification is None:
+        identification = ET.Element("identification")
+        root.insert(1 if root.find("work") is not None else 0, identification)
+    creator = ET.Element("creator", {"type": "composer"})
+    creator.text = composer
+    identification.insert(0, creator)
+
+
+def _add_tempo(root: ET.Element, text: str | None, bpm: int | None) -> None:
+    first = root.find("part/measure")
+    if first is None:
+        return
+    direction = ET.Element("direction", {"placement": "above"})
+    if text:
+        kind = ET.SubElement(direction, "direction-type")
+        ET.SubElement(kind, "words").text = text
+    if bpm:
+        kind = ET.SubElement(direction, "direction-type")
+        metronome = ET.SubElement(kind, "metronome")
+        # Значок ноты не читается, долей считается четверть.
+        ET.SubElement(metronome, "beat-unit").text = "quarter"
+        ET.SubElement(metronome, "per-minute").text = str(bpm)
+    ET.SubElement(direction, "staff").text = "1"
+    if bpm:
+        ET.SubElement(direction, "sound", {"tempo": str(bpm)})
+    position = sum(child.tag in ("print", "attributes") for child in first)
+    first.insert(position, direction)
+
+
+def set_time_signature(music_xml: str, beats: int, beat_type: int) -> str:
+    """Записывает размер в первый такт каждой партии."""
+    root = ET.fromstring(music_xml.encode("utf-8"))
+    for part in root.findall("part"):
+        first = part.find("measure")
+        if first is None:
+            continue
+        time = ET.Element("time")
+        ET.SubElement(time, "beats").text = str(beats)
+        ET.SubElement(time, "beat-type").text = str(beat_type)
+        attributes = _attributes_for_time(first)
+        # По схеме MusicXML <time> идёт сразу после <divisions> и <key>.
+        position = sum(
+            child.tag in ("footnote", "level", "divisions", "key") for child in attributes
+        )
+        attributes.insert(position, time)
+    return ET.tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def _attributes_for_time(measure: ET.Element) -> ET.Element:
+    blocks = measure.findall("attributes")
+    for block in blocks:
+        if block.find("key") is not None:
+            return block
+    if blocks:
+        return blocks[0]
+    block = ET.Element("attributes")
+    measure.insert(sum(child.tag == "print" for child in measure), block)
+    return block
 
 
 def _clean_page(root: ET.Element) -> None:
