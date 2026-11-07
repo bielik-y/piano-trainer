@@ -7,15 +7,24 @@ dependencies = [
     "bullmq",
     "boto3",
     "pydantic>=2",
+    "numpy",
     "pymupdf",
     "opencv-python-headless",
-    # "homr",  # подключается в фазе 7; в бенчмарке живёт в своём окружении bench/envs/homr
+    "music21",       # разбор MusicXML для проверки тактов
+    "pillow",
+    "pillow-heif",   # HEIC с iPhone
+    "psutil",        # остановка homr вместе с дочерними процессами
+    "rapidocr",      # название, автор и темп с картинки (модели скачиваются при первом запуске)
+    # homr ставится в отдельное окружение (конфликт зависимостей), путь — OMR_HOMR_EXE
 ]
+
+[project.scripts]
+omr-worker = "omr_worker.main:main"
 
 [dependency-groups]
 dev = ["pytest", "ruff"]
 # Бенчмарк движков OMR (bench/), в прод-образ не попадает. Сами движки живут в своих venv.
-bench = ["verovio", "resvg-py", "music21", "musicdiff", "pyyaml", "psutil"]
+bench = ["verovio", "resvg-py", "musicdiff", "pyyaml"]
 
 [build-system]
 requires = ["hatchling"]

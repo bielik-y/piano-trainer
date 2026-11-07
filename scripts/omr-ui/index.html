@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Проверка OMR</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; font: 14px/1.4 system-ui, sans-serif; color: #222; background: #fff; }
+  button { font: inherit; cursor: pointer; }
+  a { color: #1a5fb4; }
+
+  #left { width: 340px; flex: none; height: 100%; overflow-y: auto; padding: 16px; border-right: 1px solid #ddd; background: #fafafa; }
+  #right { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #777; margin: 20px 0 8px; }
+
+  #drop { display: block; padding: 24px 12px; text-align: center; border: 2px dashed #bbb; border-radius: 8px; background: #fff; cursor: pointer; }
+  #drop:hover, #drop.over { border-color: #1a5fb4; background: #eef4fc; }
+  #drop small { display: block; color: #777; margin-top: 4px; }
+  #drop input { display: none; }
+  #upload-error, .error { color: #b3261e; margin-top: 8px; }
+
+  #bar { height: 8px; background: #e4e4e4; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  #bar div { height: 100%; width: 0; background: #1a5fb4; transition: width .3s; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #e4e4e4; }
+  .badge.done { background: #d7efdb; color: #1b5e20; }
+  .badge.failed { background: #fbdedb; color: #8c1d18; }
+  .badge.processing, .badge.queued { background: #dce8f8; color: #174a8c; }
+  .row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+  .row span:first-child { color: #666; }
+  .name { font-weight: 600; word-break: break-word; }
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+
+  #issues button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 3px 0; color: #8c1d18; }
+  #issues button:hover { text-decoration: underline; }
+
+  #jobs button { display: block; width: 100%; text-align: left; padding: 6px 8px; margin-bottom: 4px; border: 1px solid #e0e0e0; border-radius: 6px; background: #fff; }
+  #jobs button:hover { background: #f0f0f0; }
+  #jobs button.active { border-color: #1a5fb4; background: #eef4fc; }
+  #jobs small { color: #777; }
+  #jobs .job-name { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+  #tabs { flex: none; display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid #ddd; }
+  #tabs button { padding: 4px 12px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+  #tabs button.active { background: #1a5fb4; border-color: #1a5fb4; color: #fff; }
+  #view { flex: 1; overflow: auto; padding: 16px; }
+  #placeholder { color: #888; text-align: center; margin-top: 80px; }
+  #score .page { margin-bottom: 12px; }
+  #score svg { display: block; max-width: 100%; height: auto; }
+  #score g.measure.bad { color: #c62828; fill: #c62828; stroke: #c62828; }
+  #score g.measure.flash { color: #e65100; fill: #e65100; stroke: #e65100; }
+  #original img { display: block; max-width: 100%; margin-bottom: 12px; border: 1px solid #ddd; }
+  #view.compare { display: flex; padding: 0; overflow: hidden; }
+  #view.compare #placeholder { flex: 1 1 0; }
+  #view.compare #score:empty { display: none; }
+  #view.compare #score, #view.compare #original { flex: 1 1 0; min-width: 0; height: 100%; overflow: auto; padding: 16px; }
+  #view.compare #original { border-left: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<div id="left">
+  <label id="drop">
+    <b>Выбери или перетащи файл</b>
+    <small>один PDF или до 10 картинок</small>
+    <input id="file" type="file" multiple accept=".pdf,image/*,.heic,.heif">
+  </label>
+  <div id="upload-error"></div>
+
+  <div id="status" hidden>
+    <h2>Статус</h2>
+    <div class="name" id="job-name"></div>
+    <div class="actions"><span class="badge" id="badge"></span><span id="stage"></span></div>
+    <div id="bar"><div></div></div>
+    <div id="job-error" class="error"></div>
+    <div id="pages"></div>
+    <div class="actions">
+      <button id="cancel" hidden>Отменить</button>
+      <a id="download" hidden download>Скачать MusicXML</a>
+    </div>
+  </div>
+
+  <div id="quality" hidden>
+    <h2>Качество</h2>
+    <div id="summary"></div>
+    <div id="issues"></div>
+  </div>
+
+  <h2>Последние задачи</h2>
+  <div id="jobs"></div>
+</div>
+
+<div id="right">
+  <div id="tabs">
+    <button id="tab-score" class="active">Ноты</button>
+    <button id="tab-original">Оригинал</button>
+    <button id="tab-compare">Рядом</button>
+  </div>
+  <div id="view">
+    <div id="placeholder">Загрузи ноты или выбери задачу слева</div>
+    <div id="score"></div>
+    <div id="original" hidden></div>
+  </div>
+</div>
+
+<script src="/verovio.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const ACTIVE = ['queued', 'processing'];
+const STAGES = { preprocessing: 'подготовка', recognizing: 'распознавание', merging: 'склейка', validating: 'проверка' };
+const STATUSES = { queued: 'в очереди', processing: 'идёт', done: 'готово', failed: 'ошибка', cancelled: 'отменено' };
+const PAGE_STATUSES = { pending: 'ждёт', processing: 'идёт', done: 'готово', failed: 'ошибка' };
+const REASONS = {
+  missing_on_staff: 'нет на одном из нотоносцев',
+  empty: 'пустой такт',
+  no_time_signature: 'неизвестен размер',
+  overflow: 'ноты выходят за такт',
+  duration_mismatch: 'длительности не сходятся с размером',
+};
+
+let toolkit = null;
+const toolkitReady = new Promise((resolve) => {
+  verovio.module.onRuntimeInitialized = () => {
+    toolkit = new verovio.toolkit();
+    resolve();
+  };
+});
+
+let currentId = null;
+let currentJob = null;
+let renderedId = null;
+let pollTimer = null;
+let mode = 'score'; // score | original | compare
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const body = (response.headers.get('content-type') || '').includes('json') ? await response.json() : null;
+  if (!response.ok) {
+    throw new Error(body?.error?.message || body?.message || `Ошибка ${response.status}`);
+  }
+  return body;
+}
+
+// --- Загрузка
+
+async function upload(files) {
+  if (!files.length) return;
+  $('upload-error').textContent = '';
+  const form = new FormData();
+  for (const file of files) form.append('files', file);
+  try {
+    const job = await api('/v1/omr/jobs', { method: 'POST', body: form });
+    selectJob(job.id);
+    refreshList();
+  } catch (e) {
+    $('upload-error').textContent = e.message;
+  }
+}
+
+$('file').addEventListener('change', (e) => {
+  upload([...e.target.files]);
+  e.target.value = '';
+});
+const drop = $('drop');
+for (const type of ['dragover', 'dragenter']) {
+  drop.addEventListener(type, (e) => { e.preventDefault(); drop.classList.add('over'); });
+}
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  upload([...e.dataTransfer.files]);
+});
+
+// --- Опрос статуса
+
+function selectJob(id) {
+  currentId = id;
+  currentJob = null;
+  renderedId = null;
+  $('score').replaceChildren();
+  $('original').replaceChildren();
+  $('placeholder').hidden = false;
+  $('placeholder').textContent = 'Ноты появятся здесь, когда распознавание закончится';
+  location.hash = id;
+  clearTimeout(pollTimer);
+  poll();
+}
+
+async function poll() {
+  const id = currentId;
+  let job;
+  try {
+    job = await api(`/v1/omr/jobs/${id}`);
+  } catch (e) {
+    if (id !== currentId) return;
+    $('upload-error').textContent = e.message;
+    pollTimer = setTimeout(poll, 3000);
+    return;
+  }
+  if (id !== currentId) return;
+  $('upload-error').textContent = '';
+  const wasActive = currentJob && ACTIVE.includes(currentJob.status);
+  currentJob = job;
+  showStatus(job);
+  if (ACTIVE.includes(job.status)) {
+    pollTimer = setTimeout(poll, 1000);
+    return;
+  }
+  if (wasActive) refreshList();
+  showResult(job);
+}
+
+function showStatus(job) {
+  $('status').hidden = false;
+  $('job-name').textContent = job.source.files.map((f) => f.name).join(', ');
+  $('badge').textContent = STATUSES[job.status];
+  $('badge').className = `badge ${job.status}`;
+
+  const progress = job.progress;
+  const active = ACTIVE.includes(job.status);
+  const parts = [];
+  if (active && progress) {
+    parts.push(STAGES[progress.stage]);
+    if (progress.page) parts.push(`стр. ${progress.page} из ${progress.pageCount}`);
+    if (progress.etaSeconds != null) parts.push(`~${progress.etaSeconds} с`);
+  }
+  $('stage').textContent = parts.join(', ');
+  $('bar').firstElementChild.style.width = `${job.status === 'done' ? 100 : progress?.percent ?? 0}%`;
+  $('job-error').textContent = job.error ? job.error.message : '';
+
+  $('pages').replaceChildren(...job.pages.map((page) => {
+    const details = [PAGE_STATUSES[page.status]];
+    if (page.measureCount != null) details.push(`тактов: ${page.measureCount}`);
+    if (page.seconds) details.push(`${page.seconds} с`);
+    const row = el('div', 'row');
+    row.append(el('span', '', `Страница ${page.index}`), el('span', '', details.join(', ')));
+    if (page.error) row.title = page.error;
+    return row;
+  }));
+
+  $('cancel').hidden = !active;
+  $('cancel').disabled = job.cancelRequested;
+  $('cancel').textContent = job.cancelRequested ? 'Отменяется…' : 'Отменить';
+  $('download').hidden = !job.result;
+  if (job.result) $('download').href = job.result.musicXmlUrl;
+
+  showQuality(job.result);
+}
+
+function showQuality(result) {
+  $('quality').hidden = !result;
+  if (!result) return;
+  const tempo = [result.tempoText, result.tempoBpm && `♩ = ${result.tempoBpm}`].filter(Boolean).join(', ');
+  const rows = [
+    ['Название', result.title ?? 'не найдено'],
+    ['Автор', result.composer ?? 'не найден'],
+    ['Темп', tempo || 'не найден'],
+    ['Нормальных тактов', `${result.okMeasureCount} из ${result.measureCount} (${Math.round(result.okRatio * 100)} %)`],
+    ['Размер', result.timeSignature
+      ? result.timeSignature + (result.timeSignatureSource === 'inferred' ? ' (вычислен, предположение)' : '')
+      : 'не определён'],
+    ['Знаки при ключе', result.keyFifths == null ? '—' : formatKey(result.keyFifths)],
+    ['Нотоносцев', result.staffCount],
+    ['Распознаны повторно', (result.rerecognizedMeasures ?? []).join(', ') || 'нет'],
+  ];
+  $('summary').replaceChildren(...rows.map(([label, value]) => {
+    const row = el('div', 'row');
+    row.append(el('span', '', label), el('span', '', String(value)));
+    return row;
+  }));
+  $('issues').replaceChildren(...result.suspiciousMeasures.map((issue) => {
+    const button = el('button', '', `Такт ${issue.number}: ${issue.reasons.map((r) => REASONS[r] ?? r).join(', ')}`);
+    button.addEventListener('click', () => flashMeasure(issue.index));
+    return button;
+  }));
+}
+
+function formatKey(fifths) {
+  if (fifths === 0) return 'нет';
+  return fifths > 0 ? `${fifths} диез.` : `${-fifths} бемол.`;
+}
+
+$('cancel').addEventListener('click', async () => {
+  try {
+    await api(`/v1/omr/jobs/${currentId}/cancel`, { method: 'POST' });
+  } catch (e) {
+    $('upload-error').textContent = e.message;
+  }
+});
+
+// --- Отображение нот
+
+async function showResult(job) {
+  if (renderedId === job.id) return;
+  renderedId = job.id;
+  showOriginal(job);
+  if (!job.result) {
+    $('placeholder').textContent = job.status === 'cancelled' ? 'Задача отменена' : 'Результата нет';
+    return;
+  }
+  $('placeholder').textContent = 'Рисую ноты…';
+  try {
+    const response = await fetch(job.result.musicXmlUrl);
+    if (!response.ok) throw new Error(`результат недоступен (${response.status})`);
+    const xml = await response.text();
+    await toolkitReady;
+    if (job.id !== currentId) return;
+    if (!toolkit.loadData(xml)) throw new Error('Verovio не смог прочитать MusicXML');
+    layout();
+    $('placeholder').hidden = true;
+  } catch (e) {
+    $('placeholder').hidden = false;
+    $('placeholder').textContent = `Не удалось показать ноты: ${e.message}`;
+  }
+}
+
+/** Раскладывает уже загруженную партитуру по ширине окна. */
+function layout() {
+  const scale = 45;
+  const available = mode === 'compare' ? $('view').clientWidth / 2 : $('view').clientWidth;
+  toolkit.setOptions({
+    pageWidth: Math.round((available - 40) * 100 / scale),
+    scale,
+    adjustPageHeight: true,
+    breaks: 'auto',
+    footer: 'none',
+  });
+  toolkit.redoLayout();
+  const pages = [];
+  for (let n = 1; n <= toolkit.getPageCount(); n++) {
+    const page = el('div', 'page');
+    page.innerHTML = toolkit.renderToSVG(n);
+    pages.push(page);
+  }
+  $('score').replaceChildren(...pages);
+  const measures = $('score').querySelectorAll('g.measure');
+  for (const issue of currentJob?.result?.suspiciousMeasures ?? []) {
+    measures[issue.index]?.classList.add('bad');
+  }
+}
+
+function flashMeasure(index) {
+  if (mode === 'original') showTab('score');
+  const measure = $('score').querySelectorAll('g.measure')[index];
+  if (!measure) return;
+  measure.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  measure.classList.add('flash');
+  setTimeout(() => measure.classList.remove('flash'), 1500);
+}
+
+function showOriginal(job) {
+  $('original').replaceChildren(...job.pages.map((page) => {
+    const image = el('img');
+    image.loading = 'lazy';
+    image.alt = `Страница ${page.index}`;
+    image.src = `/v1/omr/jobs/${job.id}/pages/${page.index}`;
+    return image;
+  }));
+}
+
+function showTab(name) {
+  mode = name;
+  $('score').hidden = name === 'original';
+  $('original').hidden = name === 'score';
+  $('view').classList.toggle('compare', name === 'compare');
+  for (const tab of ['score', 'original', 'compare']) {
+    $(`tab-${tab}`).classList.toggle('active', tab === name);
+  }
+  relayout();
+}
+for (const tab of ['score', 'original', 'compare']) {
+  $(`tab-${tab}`).addEventListener('click', () => showTab(tab));
+}
+
+/** Перерисовывает уже показанные ноты под новую ширину. */
+function relayout() {
+  if ($('score').childElementCount) layout();
+}
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(relayout, 200);
+});
+
+// --- Список задач
+
+async function refreshList() {
+  let items;
+  try {
+    ({ items } = await api('/v1/omr/jobs?limit=15'));
+  } catch (e) {
+    $('upload-error').textContent = e.message;
+    return;
+  }
+  $('jobs').replaceChildren(...items.map((job) => {
+    const button = el('button', job.id === currentId ? 'active' : '');
+    const when = new Date(job.createdAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+    const percent = job.result ? `, ${Math.round(job.result.okRatio * 100)} %` : '';
+    button.append(
+      el('span', 'job-name', job.source.files.map((f) => f.name).join(', ')),
+      el('small', '', `${when}, ${STATUSES[job.status]}${percent}`),
+    );
+    button.addEventListener('click', () => {
+      selectJob(job.id);
+      refreshList();
+    });
+    return button;
+  }));
+}
+
+function el(tag, className = '', text = '') {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text) node.textContent = text;
+  return node;
+}
+
+refreshList();
+if (location.hash.length > 1) selectJob(location.hash.slice(1));
+// Ссылка на другую задачу в той же вкладке: страница не перезагружается, меняется только #.
+window.addEventListener('hashchange', () => {
+  const id = location.hash.slice(1);
+  if (id && id !== currentId) {
+    selectJob(id);
+    refreshList();
+  }
+});
+</script>
+</body>
+</html>

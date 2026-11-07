@@ -17,3 +17,6 @@ __pycache__/
 services/omr-worker/bench/data/
 services/omr-worker/bench/out/
 services/omr-worker/bench/envs/
+
+# Локальные данные OMR (SQLite, загруженные файлы, результаты)
+.data/

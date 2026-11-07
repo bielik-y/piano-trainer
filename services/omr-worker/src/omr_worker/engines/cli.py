@@ -8,6 +8,8 @@
 import os
 import shutil
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from .base import OmrResult
@@ -17,8 +19,41 @@ class EngineError(RuntimeError):
     pass
 
 
+class EngineTimeout(EngineError):
+    pass
+
+
+class EngineCancelled(EngineError):
+    pass
+
+
+class EngineNoMusic(EngineError):
+    """На странице нет нот (пустые станы, текст). Это не сбой: страница просто не даёт тактов."""
+
+
+def kill_tree(process: subprocess.Popen) -> None:
+    """Останавливает процесс вместе с дочерними: на Windows `homr.exe` из venv — лаунчер,
+    распознавание идёт в дочернем python.exe, и `process.kill()` его не остановит."""
+    import psutil
+
+    try:
+        parent = psutil.Process(process.pid)
+        children = parent.children(recursive=True)
+    except psutil.Error:
+        children = []
+    for p in children:
+        try:
+            p.kill()
+        except psutil.Error:
+            pass
+    process.kill()
+    process.wait()
+
+
 class CliEngine:
     name = "cli"
+    # Строка в логе движка, означающая, что на странице нет нот.
+    no_music_marker: str | None = None
 
     def __init__(self, executable: Path, timeout_s: int = 1800) -> None:
         self.executable = executable
@@ -50,15 +85,31 @@ class CliEngine:
         """Вызывается после завершения процесса; возвращает итоговый файл результата."""
         return output
 
-    def recognize_page(self, image: Path, out_dir: Path) -> Path:
+    def recognize_page(
+        self, image: Path, out_dir: Path, should_stop: Callable[[], bool] | None = None
+    ) -> Path:
+        """Распознаёт страницу. `should_stop` опрашивается каждые 0,5 с: True — остановить."""
         process, output = self.popen(image, out_dir)
-        try:
-            code = process.wait(timeout=self.timeout_s)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            raise EngineError(f"{self.name}: таймаут {self.timeout_s} с") from None
+        deadline = time.monotonic() + self.timeout_s
+        while True:
+            try:
+                code = process.wait(timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if should_stop is not None and should_stop():
+                kill_tree(process)
+                raise EngineCancelled(f"{self.name}: остановлено")
+            if time.monotonic() > deadline:
+                kill_tree(process)
+                raise EngineTimeout(f"{self.name}: таймаут {self.timeout_s} с")
         output = self.finalize(output)
         if code != 0 or not output.exists():
+            log = out_dir / f"{image.stem}.{self.name}.log"
+            if self.no_music_marker and self.no_music_marker in log.read_text(
+                encoding="utf-8", errors="replace"
+            ):
+                raise EngineNoMusic(f"{self.name}: на странице нет нот")
             raise EngineError(f"{self.name}: код выхода {code}, результата нет ({output.name})")
         return output
 
@@ -138,6 +189,15 @@ class HomrEngine(CliEngine):
     """homr пишет результат рядом с картинкой, поэтому картинка копируется в out_dir."""
 
     name = "homr"
+    no_music_marker = "No noteheads found"
+
+    def version(self) -> str | None:
+        """Версия homr из его окружения (dist-info рядом с исполняемым файлом)."""
+        env = self.executable.parent.parent
+        for info in [*env.glob("Lib/site-packages/homr-*.dist-info"),
+                     *env.glob("lib/python*/site-packages/homr-*.dist-info")]:
+            return info.name.removeprefix("homr-").removesuffix(".dist-info")
+        return None
 
     def prepare(self, image: Path, out_dir: Path) -> Path:
         target = out_dir / image.name
@@ -146,7 +206,8 @@ class HomrEngine(CliEngine):
         return target
 
     def command(self, image: Path, out_dir: Path) -> list[str]:
-        return [str(self.executable), str(image)]
+        # Положение строк нужно для повторного распознавания проблемных строк (rerun.py).
+        return [str(self.executable), str(image), "--write-staff-positions"]
 
 
 def _merge_movements(documents: list[str]) -> str:
