@@ -11,6 +11,7 @@
 
 import json
 import logging
+import re
 import shutil
 import time
 from collections.abc import Callable
@@ -27,6 +28,7 @@ from .engines.cli import EngineCancelled, EngineError, EngineNoMusic, EngineTime
 from .measures import check_measures, infer_time_signature, measures_from_score, parse_score
 from .merge import merge_pages, page_of_measure, set_score_info, set_time_signature
 from .metadata import ScoreInfo, read_score_info
+from .meter import apply_meter_changes
 from .models import (
     Cancelled,
     EngineInfo,
@@ -37,6 +39,7 @@ from .models import (
     SuspiciousMeasure,
 )
 from .preprocess import image_size, is_pdf, prepare_pages
+from .rerun import PageSource, map_systems, rerecognize
 from .timing import close_voice_gaps
 
 log = logging.getLogger(__name__)
@@ -122,11 +125,13 @@ def run_pipeline(
     # 2. Распознавание по страницам
     work = job_dir / "work"
     documents: list[str | None] = []
+    outputs: list[Path | None] = []
     spent: list[float] = []
     for page, image in zip(pages, images):
         if page.index in blank_pages:
             page.status, page.seconds = "done", 0.0
             documents.append(None)
+            outputs.append(None)
             spent.append(0.0)
             continue
         page.status = "processing"
@@ -146,6 +151,7 @@ def run_pipeline(
         try:
             output = engine.recognize_page(image, work, should_stop=listener.should_stop)
             documents.append(_read_text(output))
+            outputs.append(output)
             page.status = "done"
         except EngineCancelled:
             page.status = "pending"
@@ -153,12 +159,15 @@ def run_pipeline(
         except EngineNoMusic:
             page.status = "done"
             documents.append(None)
+            outputs.append(None)
         except EngineTimeout as e:
             page.status, page.error = "failed", f"Таймаут распознавания: {e}"
             documents.append(None)
+            outputs.append(None)
         except EngineError as e:
             page.status, page.error = "failed", f"Движок не распознал страницу: {e}"
             documents.append(None)
+            outputs.append(None)
         page.seconds = round(time.monotonic() - started, 1)
         spent.append(page.seconds)
 
@@ -197,18 +206,33 @@ def run_pipeline(
     if not measures or not any(m.has_events for m in measures):
         raise OmrFailure("no_music_found", "На страницах не найдено нот")
     info = _read_info(sources, images, documents)
-    music_xml_text = set_score_info(merged.music_xml, info)
-    time_signature_source = "engine" if _first_time_signature(score) else None
-    if time_signature_source is None:
-        inferred = infer_time_signature(measures)
-        if inferred is not None:
-            music_xml_text = set_time_signature(music_xml_text, *inferred)
-            time_signature_source = "inferred"
-    # Сдвиг нот считается по длине такта, поэтому после размера; знаки — по уже верному времени.
-    music_xml_text = add_beams(add_accidentals(close_voice_gaps(music_xml_text)))
-    score = parse_score(music_xml_text)
-    measures = measures_from_score(score)
-    issues = check_measures(measures)
+    raw_xml = set_score_info(merged.music_xml, info)
+    finished = _postprocess(raw_xml)
+
+    # 5. Повторное распознавание строк, где постобработка не помогла
+    rerecognized: list[int] = []
+    if finished.issues:
+        page_sources = [
+            PageSource(image, _positions(output)) for image, output in zip(images, outputs)
+        ]
+        raw_xml, rerecognized = rerecognize(
+            raw_xml,
+            set(finished.issues),
+            map_systems(raw_xml, per_page),
+            page_sources,
+            recognize=lambda image: _read_text(
+                engine.recognize_page(image, work / "rerun", should_stop=listener.should_stop)
+            ),
+            evaluate=lambda candidate: set(_postprocess(candidate).issues),
+            work=work / "rerun",
+            should_stop=listener.should_stop,
+        )
+        if rerecognized:
+            finished = _postprocess(raw_xml)
+    music_xml_text, score, measures, issues = (
+        finished.music_xml, finished.score, finished.measures, finished.issues
+    )
+    time_signature_source = finished.time_signature_source
     ok_count = len(measures) - len(issues)
     ok_ratio = round(ok_count / len(measures), 4)
 
@@ -226,6 +250,7 @@ def run_pipeline(
         composer=info.composer,
         tempo_text=info.tempo_text,
         tempo_bpm=info.tempo_bpm,
+        rerecognized_measures=[measures[i].number or str(i + 1) for i in rerecognized],
         suspicious_measures=[
             SuspiciousMeasure(
                 index=index,
@@ -248,6 +273,47 @@ def run_pipeline(
         encoding="utf-8",
     )
     return PipelineOutput(report=report, pages=pages, music_xml=music_xml, report_path=report_path)
+
+
+@dataclass(frozen=True)
+class _Finished:
+    music_xml: str
+    score: m21.stream.Score
+    measures: list
+    issues: dict[int, list[str]]
+    time_signature_source: str | None
+
+
+def _postprocess(raw_xml: str) -> _Finished:
+    """Вся постобработка сырого MusicXML и проверка тактов."""
+    measures = measures_from_score(parse_score(raw_xml))
+    music_xml_text = raw_xml
+    time_signature_source = "engine" if _has_time_signature(raw_xml) else None
+    if time_signature_source is None:
+        inferred = infer_time_signature(measures)
+        if inferred is not None:
+            music_xml_text = set_time_signature(music_xml_text, *inferred)
+            time_signature_source = "inferred"
+    # Сдвиг нот считается по длине такта, поэтому после размера; знаки — по уже верному времени.
+    music_xml_text, _ = apply_meter_changes(music_xml_text)
+    music_xml_text = add_beams(add_accidentals(close_voice_gaps(music_xml_text)))
+    score = parse_score(music_xml_text)
+    measures = measures_from_score(score)
+    return _Finished(
+        music_xml_text, score, measures, check_measures(measures), time_signature_source
+    )
+
+
+def _has_time_signature(music_xml: str) -> bool:
+    return re.search(r"<time[\s>]", music_xml) is not None
+
+
+def _positions(output: Path | None) -> Path | None:
+    """Файл движка с положением строк на странице (homr --write-staff-positions)."""
+    if output is None:
+        return None
+    positions = output.with_suffix(".txt")
+    return positions if positions.exists() else None
 
 
 def _read_info(

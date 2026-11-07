@@ -103,18 +103,19 @@ def set_time_signature(music_xml: str, beats: int, beat_type: int) -> str:
     root = ET.fromstring(music_xml.encode("utf-8"))
     for part in root.findall("part"):
         first = part.find("measure")
-        if first is None:
-            continue
-        time = ET.Element("time")
-        ET.SubElement(time, "beats").text = str(beats)
-        ET.SubElement(time, "beat-type").text = str(beat_type)
-        attributes = _attributes_for_time(first)
-        # По схеме MusicXML <time> идёт сразу после <divisions> и <key>.
-        position = sum(
-            child.tag in ("footnote", "level", "divisions", "key") for child in attributes
-        )
-        attributes.insert(position, time)
+        if first is not None:
+            insert_time(first, beats, beat_type)
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def insert_time(measure: ET.Element, beats: int, beat_type: int) -> None:
+    """Добавляет в такт <time>; по схеме MusicXML он идёт сразу после <divisions> и <key>."""
+    time = ET.Element("time")
+    ET.SubElement(time, "beats").text = str(beats)
+    ET.SubElement(time, "beat-type").text = str(beat_type)
+    attributes = _attributes_for_time(measure)
+    position = sum(child.tag in ("footnote", "level", "divisions", "key") for child in attributes)
+    attributes.insert(position, time)
 
 
 def _attributes_for_time(measure: ET.Element) -> ET.Element:

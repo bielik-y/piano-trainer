@@ -74,6 +74,8 @@ class Report(Model):
     composer: str | None = None
     tempo_text: str | None = None
     tempo_bpm: int | None = None
+    # Такты, которые исправило повторное распознавание отдельной строки.
+    rerecognized_measures: list[str] = []
     suspicious_measures: list[SuspiciousMeasure]
     engine: EngineInfo
 

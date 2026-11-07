@@ -8,8 +8,8 @@
 - неизвестен размер (не напечатан и не унаследован) — `no_time_signature`;
 - событие выходит за конец такта — `overflow`;
 - сумма длительностей в голосе ≠ длине такта по размеру — `duration_mismatch`
-  (короче можно первому и последнему такту пьесы — затакт и неполный финал — и дополнительному
-  голосу, если другой голос того же нотоносца заполняет такт).
+  (короче можно первому такту пьесы — затакт; последнему — только если вместе с затактом он
+  даёт целый такт; и дополнительному голосу, если другой голос того же нотоносца заполняет такт).
 """
 
 import warnings
@@ -141,7 +141,9 @@ def check_measures(
         if measure.end > expected:
             issues[index] = ["overflow"]
             continue
-        may_be_short = (piece_start and index == 0) or (piece_end and index == last)
+        may_be_short = (piece_start and index == 0) or (
+            piece_end and index == last and _completes_pickup(measures, expected, piece_start)
+        )
         for lengths in measure.voice_lengths:
             staff_is_full = expected in (lengths or [])
             for length in lengths or []:
@@ -153,6 +155,21 @@ def check_measures(
                 ):
                     issues[index] = ["duration_mismatch"]
     return issues
+
+
+def _completes_pickup(measures: list[Measure], expected: Fraction, piece_start: bool) -> bool:
+    """Последний такт может быть неполным, только если вместе с затактом он даёт целый такт.
+
+    Иначе короткий финал — это потерянные ноты. Если начала пьесы в проверке нет (отдельная
+    страница), затакт не виден, и финал проверяется по-старому — неполный разрешён."""
+    if not piece_start:
+        return True
+    if len(measures) < 2:
+        return False
+    first, last = measures[0], measures[-1]
+    pickup = _longest_voice(first)
+    first_length = first.expected_length or expected
+    return pickup < first_length and pickup + _longest_voice(last) == expected
 
 
 def infer_time_signature(measures: list[Measure]) -> tuple[int, int] | None:

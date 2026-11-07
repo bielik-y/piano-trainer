@@ -261,6 +261,7 @@ function showQuality(result) {
       : 'не определён'],
     ['Знаки при ключе', result.keyFifths == null ? '—' : formatKey(result.keyFifths)],
     ['Нотоносцев', result.staffCount],
+    ['Распознаны повторно', (result.rerecognizedMeasures ?? []).join(', ') || 'нет'],
   ];
   $('summary').replaceChildren(...rows.map(([label, value]) => {
     const row = el('div', 'row');

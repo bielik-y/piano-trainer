@@ -84,6 +84,8 @@ export const OmrReport = z.object({
   tempoText: z.string().nullable().default(null),
   /** Темп числом; значок ноты не читается, долей считается четверть. */
   tempoBpm: z.number().int().positive().nullable().default(null),
+  /** Номера тактов, исправленных повторным распознаванием отдельной строки. */
+  rerecognizedMeasures: z.array(z.string()).default([]),
   suspiciousMeasures: z.array(SuspiciousMeasure),
   engine: z.object({ name: z.string(), version: z.string().nullable() }),
 });

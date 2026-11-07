@@ -82,14 +82,26 @@ def test_wrong_tie_only_is_counted_separately(tmp_path):
     assert (page.silent_errors, page.tie_only_errors) == (1, 1)
 
 
-def test_short_last_measure_is_allowed(tmp_path):
+def test_short_last_measure_is_allowed_when_it_completes_pickup(tmp_path):
     gt_bars = list(C_MAJOR)
-    gt_bars[2] = ([("A4", 2)], [("F2", 2)])
+    gt_bars[0] = ([("G4", 2)], [("C3", 2)])  # затакт на полтакта
+    gt_bars[2] = ([("A4", 2)], [("F2", 2)])  # финал на полтакта: вместе целый такт
     gt = load_measures(write_score(tmp_path, "gt", gt_bars))
     result = load_measures(write_score(tmp_path, "result", gt_bars))
     assert compare(gt, result).correct == 3
     # Но в середине пьесы (страница не последняя) такой такт помечается.
     assert compare(gt, result, piece_end=False).flagged == 1
+
+
+def test_short_last_measure_without_pickup_is_flagged(tmp_path):
+    # Финал короче такта, а затакта нет: скорее всего, движок потерял ноты.
+    gt_bars = list(C_MAJOR)
+    gt_bars[2] = ([("A4", 2)], [("F2", 2)])
+    gt = load_measures(write_score(tmp_path, "gt", gt_bars))
+    result = load_measures(write_score(tmp_path, "result", gt_bars))
+    assert compare(gt, result).flagged == 1
+    # Если начало пьесы на другой странице, затакт не виден, и финал не помечается.
+    assert compare(gt, result, piece_start=False).correct == 3
 
 
 def test_extra_measure_is_aligned_and_counted(tmp_path):

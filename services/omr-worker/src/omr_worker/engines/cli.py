@@ -206,7 +206,8 @@ class HomrEngine(CliEngine):
         return target
 
     def command(self, image: Path, out_dir: Path) -> list[str]:
-        return [str(self.executable), str(image)]
+        # Положение строк нужно для повторного распознавания проблемных строк (rerun.py).
+        return [str(self.executable), str(image), "--write-staff-positions"]
 
 
 def _merge_movements(documents: list[str]) -> str:
