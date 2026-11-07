@@ -8,7 +8,8 @@
 - неизвестен размер (не напечатан и не унаследован) — `no_time_signature`;
 - событие выходит за конец такта — `overflow`;
 - сумма длительностей в голосе ≠ длине такта по размеру — `duration_mismatch`
-  (короче можно только первому и последнему такту пьесы — затакт и неполный финал).
+  (короче можно первому и последнему такту пьесы — затакт и неполный финал — и дополнительному
+  голосу, если другой голос того же нотоносца заполняет такт).
 """
 
 import warnings
@@ -142,11 +143,14 @@ def check_measures(
             continue
         may_be_short = (piece_start and index == 0) or (piece_end and index == last)
         for lengths in measure.voice_lengths:
+            staff_is_full = expected in (lengths or [])
             for length in lengths or []:
                 # Голос без событий (пустой <voice>) не нарушение.
                 if length == 0:
                     continue
-                if length > expected or (length < expected and not may_be_short):
+                if length > expected or (
+                    length < expected and not may_be_short and not staff_is_full
+                ):
                     issues[index] = ["duration_mismatch"]
     return issues
 

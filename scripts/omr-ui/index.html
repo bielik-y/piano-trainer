@@ -417,6 +417,14 @@ function el(tag, className = '', text = '') {
 
 refreshList();
 if (location.hash.length > 1) selectJob(location.hash.slice(1));
+// Ссылка на другую задачу в той же вкладке: страница не перезагружается, меняется только #.
+window.addEventListener('hashchange', () => {
+  const id = location.hash.slice(1);
+  if (id && id !== currentId) {
+    selectJob(id);
+    refreshList();
+  }
+});
 </script>
 </body>
 </html>

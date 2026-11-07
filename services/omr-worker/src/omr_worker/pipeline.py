@@ -20,6 +20,7 @@ from typing import Protocol
 
 import music21 as m21
 
+from .accidentals import add_accidentals
 from .empty_staves import remove_empty_systems
 from .engines.cli import EngineCancelled, EngineError, EngineNoMusic, EngineTimeout
 from .measures import check_measures, infer_time_signature, measures_from_score, parse_score
@@ -35,6 +36,7 @@ from .models import (
     SuspiciousMeasure,
 )
 from .preprocess import image_size, is_pdf, prepare_pages
+from .timing import close_voice_gaps
 
 log = logging.getLogger(__name__)
 
@@ -200,9 +202,11 @@ def run_pipeline(
         inferred = infer_time_signature(measures)
         if inferred is not None:
             music_xml_text = set_time_signature(music_xml_text, *inferred)
-            score = parse_score(music_xml_text)
-            measures = measures_from_score(score)
             time_signature_source = "inferred"
+    # Сдвиг нот считается по длине такта, поэтому после размера; знаки — по уже верному времени.
+    music_xml_text = add_accidentals(close_voice_gaps(music_xml_text))
+    score = parse_score(music_xml_text)
+    measures = measures_from_score(score)
     issues = check_measures(measures)
     ok_count = len(measures) - len(issues)
     ok_ratio = round(ok_count / len(measures), 4)
