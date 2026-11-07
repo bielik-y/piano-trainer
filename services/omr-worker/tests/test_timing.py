@@ -133,3 +133,20 @@ def test_onsets_follow_backup_forward_and_chords():
     body = note("C5", 8) + note("E5", 8, chord=True) + backup(8) + forward + note("G5", 4, voice=2)
     starts = [t for t, _ in notes_with_onsets(ET.fromstring(bar(1, body)))]
     assert starts == [Fraction(0), Fraction(0), Fraction(4)]
+
+
+def test_voices_are_written_one_after_another_without_moving_notes():
+    # Как пишет homr: ноты верхнего и нижнего нотоносцев вперемешку через <backup>.
+    body = (
+        note("G5", 2) + backup(2) + note("C4", 2, staff=2)
+        + note("E5", 2) + backup(2) + note("E4", 2, staff=2)
+        + note("B5", 2) + backup(2) + note("G4", 4, staff=2) + backup(2)
+        + note("C6", 2)
+    )
+    xml = score(bar(1, body, fifths=0))
+
+    result = close_voice_gaps(xml)
+
+    staves = [staff for staff, _, _ in onsets(result)[0]]
+    assert staves == ["1", "1", "1", "1", "2", "2", "2"]
+    assert sorted(onsets(result)[0]) == sorted(onsets(xml)[0])

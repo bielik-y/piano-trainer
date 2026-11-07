@@ -6,10 +6,15 @@ homr выдаёт ноты обоих нотоносцев одной цепоч
 внутри голоса просто появляются «дырки», и такт вылезает за свою длину.
 
 `close_voice_gaps` убирает эти дырки, но только в тактах, которые вылезают за длину, и только
-если после этого каждый голос в неё укладывается. Остальные такты не трогаются: голос, который
-законно начинается не с начала такта, сохраняет своё начало.
+если после этого каждый голос в неё укладывается. В остальных тактах время нот не меняется:
+голос, который законно начинается не с начала такта, сохраняет своё начало.
+
+Кроме того, голоса каждого такта записываются по очереди, а не вперемешку, как у homr: иначе
+просмотрщики путают ребра разных голосов (Verovio соединял ноты верхнего и нижнего нотоносцев).
 """
 
+from collections.abc import Iterator
+from dataclasses import dataclass
 from fractions import Fraction
 from xml.etree import ElementTree as ET
 
@@ -35,11 +40,21 @@ def notes_with_onsets(measure: ET.Element) -> list[tuple[Fraction, ET.Element]]:
     return result
 
 
-def close_voice_gaps(music_xml: str) -> str:
-    root = ET.fromstring(music_xml.encode("utf-8"))
+@dataclass(frozen=True)
+class Meter:
+    divisions: int  # единиц на четверть
+    beats: int
+    beat_type: int
+
+    @property
+    def length(self) -> Fraction:
+        return Fraction(self.divisions * 4 * self.beats, self.beat_type)
+
+
+def measures_with_meter(root: ET.Element) -> Iterator[tuple[ET.Element, Meter]]:
+    """Такты всех партий с действующим размером; такты до первого размера пропускаются."""
     for part in root.findall("part"):
         divisions: int | None = None
-        length: Fraction | None = None
         beats: tuple[int, int] | None = None
         for measure in part.findall("measure"):
             for attributes in measure.findall("attributes"):
@@ -49,15 +64,19 @@ def close_voice_gaps(music_xml: str) -> str:
                 if time is not None:
                     beats = (int(time.findtext("beats")), int(time.findtext("beat-type")))
             if divisions and beats:
-                length = Fraction(divisions * 4 * beats[0], beats[1])
-            if length is not None:
-                _fix_measure(measure, length)
+                yield measure, Meter(divisions, *beats)
+
+
+def close_voice_gaps(music_xml: str) -> str:
+    root = ET.fromstring(music_xml.encode("utf-8"))
+    for measure, meter in measures_with_meter(root):
+        _fix_measure(measure, meter.length)
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 
 def _fix_measure(measure: ET.Element, length: Fraction) -> None:
     notes = notes_with_onsets(measure)
-    if not notes or max(onset + _duration(note) for onset, note in notes) <= length:
+    if not notes:
         return
 
     # Голос: группы (начало, ноты аккорда) в порядке записи.
@@ -70,17 +89,25 @@ def _fix_measure(measure: ET.Element, length: Fraction) -> None:
         else:
             groups.append((onset, [note]))
 
-    packed: list[list[tuple[Fraction, list[ET.Element]]]] = []
-    for groups in voices.values():
-        cursor = groups[0][0]
-        voice = []
-        for _, chord in groups:
-            voice.append((cursor, chord))
-            cursor += _duration(chord[0])
-        if cursor > length:
-            return  # длительностей больше, чем в такте: это ошибка распознавания, не сдвиг
-        packed.append(voice)
-    _rewrite(measure, packed)
+    arranged = list(voices.values())
+    if max(onset + _duration(note) for onset, note in notes) > length:
+        packed = [_pack(groups) for groups in arranged]
+        # Если длительностей больше, чем в такте, это ошибка распознавания, а не сдвиг.
+        if all(voice[-1][0] + _duration(voice[-1][1][0]) <= length for voice in packed):
+            arranged = packed
+    _rewrite(measure, arranged)
+
+
+def _pack(
+    groups: list[tuple[Fraction, list[ET.Element]]],
+) -> list[tuple[Fraction, list[ET.Element]]]:
+    """Ноты голоса подряд, без дырок; начало первой ноты сохраняется."""
+    cursor = groups[0][0]
+    voice = []
+    for _, chord in groups:
+        voice.append((cursor, chord))
+        cursor += _duration(chord[0])
+    return voice
 
 
 def _rewrite(measure: ET.Element, voices: list[list[tuple[Fraction, list[ET.Element]]]]) -> None:

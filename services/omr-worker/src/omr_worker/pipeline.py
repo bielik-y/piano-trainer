@@ -21,6 +21,7 @@ from typing import Protocol
 import music21 as m21
 
 from .accidentals import add_accidentals
+from .beams import add_beams
 from .empty_staves import remove_empty_systems
 from .engines.cli import EngineCancelled, EngineError, EngineNoMusic, EngineTimeout
 from .measures import check_measures, infer_time_signature, measures_from_score, parse_score
@@ -204,7 +205,7 @@ def run_pipeline(
             music_xml_text = set_time_signature(music_xml_text, *inferred)
             time_signature_source = "inferred"
     # Сдвиг нот считается по длине такта, поэтому после размера; знаки — по уже верному времени.
-    music_xml_text = add_accidentals(close_voice_gaps(music_xml_text))
+    music_xml_text = add_beams(add_accidentals(close_voice_gaps(music_xml_text)))
     score = parse_score(music_xml_text)
     measures = measures_from_score(score)
     issues = check_measures(measures)
