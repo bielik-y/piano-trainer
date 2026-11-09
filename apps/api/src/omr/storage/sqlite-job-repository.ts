@@ -15,6 +15,7 @@ import { JobRepository, type JobRecord, type NewJob } from './job-repository.js'
 
 const Row = z.object({
   id: z.string(),
+  device_id: z.string().nullable(),
   status: OmrJobStatus,
   revision: z.number(),
   created_at: z.string(),
@@ -57,10 +58,11 @@ export class SqliteJobRepository extends JobRepository {
     const at = now();
     this.db
       .prepare(
-        `INSERT INTO omr_jobs (id, status, created_at, updated_at, source_kind, source_files, pages)
-         VALUES (?, 'queued', ?, ?, ?, ?, '[]')`,
+        `INSERT INTO omr_jobs
+           (id, device_id, status, created_at, updated_at, source_kind, source_files, pages)
+         VALUES (?, ?, 'queued', ?, ?, ?, ?, '[]')`,
       )
-      .run(job.id, at, at, job.sourceKind, JSON.stringify(job.sourceFiles));
+      .run(job.id, job.deviceId, at, at, job.sourceKind, JSON.stringify(job.sourceFiles));
     return this.get(job.id)!;
   }
 
@@ -71,15 +73,16 @@ export class SqliteJobRepository extends JobRepository {
 
   revision(id: string): number | null {
     const row = this.db.prepare('SELECT revision FROM omr_jobs WHERE id = ?').get(id) as
-      | { revision: number }
-      | undefined;
+      { revision: number } | undefined;
     return row ? row.revision : null;
   }
 
-  list(limit: number): JobRecord[] {
+  list(deviceId: string, limit: number): JobRecord[] {
     return this.db
-      .prepare('SELECT * FROM omr_jobs ORDER BY created_at DESC, id DESC LIMIT ?')
-      .all(limit)
+      .prepare(
+        'SELECT * FROM omr_jobs WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT ?',
+      )
+      .all(deviceId, limit)
       .map(toRecord);
   }
 
@@ -120,6 +123,7 @@ function toRecord(raw: unknown): JobRecord {
   const row = Row.parse(raw);
   return {
     id: row.id,
+    deviceId: row.device_id,
     status: row.status,
     revision: row.revision,
     createdAt: row.created_at,

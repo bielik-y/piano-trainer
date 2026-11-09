@@ -4,8 +4,19 @@ import { z } from 'zod';
 // Импорт регистрирует схемы контракта (.meta({id})) в z.globalRegistry.
 import '@piano/contracts';
 
-/** Ссылка на схему контракта в components.schemas (OmrJob, OmrJobList, ApiError). */
-export const schemaRef = (name: 'OmrJob' | 'OmrJobList' | 'ApiError') => ({
+/** Схемы контракта с `.meta({id})`, которые попадают в components.schemas. */
+export type ContractSchema =
+  | 'OmrJob'
+  | 'OmrJobList'
+  | 'ApiError'
+  | 'DeviceRegistration'
+  | 'Piece'
+  | 'PieceList'
+  | 'CreatePieceFromOmr'
+  | 'UpdatePiece';
+
+/** Ссылка на схему контракта в components.schemas. */
+export const schemaRef = (name: ContractSchema) => ({
   $ref: `#/components/schemas/${name}`,
 });
 
@@ -28,10 +39,12 @@ export function setupSwagger(app: INestApplication): void {
   const config = new DocumentBuilder()
     .setTitle('piano-trainer API')
     .setDescription(
-      'Распознавание нот (OMR): загрузите PDF или фото, следите за прогрессом, скачайте ' +
-      'MusicXML. Сначала запустите воркер: `pnpm dev:omr-worker`.',
+      'Распознавание нот (OMR) и библиотека пьес. Сначала получите токен устройства: ' +
+        '`POST /v1/devices`, затем **Authorize** и вставьте token. Для распознавания запустите ' +
+        'воркер: `pnpm dev:omr-worker`.',
     )
     .setVersion(process.env.npm_package_version ?? 'dev')
+    .addBearerAuth({ type: 'http', scheme: 'bearer', description: 'Токен из POST /v1/devices' })
     .build();
   const document = SwaggerModule.createDocument(app, config);
   document.components = {
@@ -40,6 +53,10 @@ export function setupSwagger(app: INestApplication): void {
   };
   SwaggerModule.setup('docs', app, document, {
     jsonDocumentUrl: 'docs-json',
-    swaggerOptions: { tryItOutEnabled: true, displayRequestDuration: true },
+    swaggerOptions: {
+      tryItOutEnabled: true,
+      displayRequestDuration: true,
+      persistAuthorization: true,
+    },
   });
 }

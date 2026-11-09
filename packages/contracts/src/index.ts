@@ -167,6 +167,7 @@ export const ApiErrorCode = z.enum([
   'result_not_ready',
   'already_finished',
   'bad_request',
+  'unauthorized',
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCode>;
 
@@ -180,6 +181,20 @@ export const OMR_LIMITS = {
   maxFileBytes: 25 * 1024 * 1024,
   maxPdfPages: 20,
 } as const;
+
+// --- Устройство ---
+
+/**
+ * Ответ `POST /v1/devices`: анонимное устройство. Токен показывается один раз; дальше он идёт
+ * в каждом запросе как `Authorization: Bearer <token>`. Задачи и пьесы принадлежат устройству.
+ */
+export const DeviceRegistration = z
+  .object({
+    deviceId: z.uuid(),
+    token: z.string(),
+  })
+  .meta({ id: 'DeviceRegistration' });
+export type DeviceRegistration = z.infer<typeof DeviceRegistration>;
 
 // --- Health ---
 

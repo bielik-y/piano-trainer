@@ -44,3 +44,12 @@ export async function createTestApp(): Promise<TestApp> {
     },
   };
 }
+
+/** Регистрирует устройство и возвращает заголовок с его токеном. */
+export async function registerDevice(
+  app: NestFastifyApplication,
+): Promise<{ authorization: string }> {
+  const res = await app.inject({ method: 'POST', url: '/v1/devices' });
+  if (res.statusCode !== 201) throw new Error(`POST /v1/devices: ${res.statusCode} ${res.body}`);
+  return { authorization: `Bearer ${(res.json() as { token: string }).token}` };
+}

@@ -11,6 +11,8 @@ import type {
 /** Запись задачи в хранилище (без ссылок — их добавляет сервис). */
 export interface JobRecord {
   id: string;
+  /** Устройство-владелец; null у задач, созданных до появления токенов. */
+  deviceId: string | null;
   status: OmrJobStatus;
   revision: number;
   createdAt: string;
@@ -28,6 +30,7 @@ export interface JobRecord {
 
 export interface NewJob {
   id: string;
+  deviceId: string;
   sourceKind: OmrSourceKind;
   sourceFiles: StoredSourceFile[];
 }
@@ -41,7 +44,8 @@ export abstract class JobRepository {
   abstract get(id: string): JobRecord | null;
   /** Ревизия без чтения всей записи — для SSE. */
   abstract revision(id: string): number | null;
-  abstract list(limit: number): JobRecord[];
+  /** Последние задачи устройства, новые первыми. */
+  abstract list(deviceId: string, limit: number): JobRecord[];
   /** queued → cancelled. true, если задача ещё ждала в очереди. */
   abstract cancelQueued(id: string): boolean;
   /** Для задачи в работе: попросить воркер остановиться. */

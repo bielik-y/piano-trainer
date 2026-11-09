@@ -57,7 +57,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     clearInterval(this.purgeTimer);
   }
 
-  async create(uploads: AsyncIterable<UploadedFile>): Promise<OmrJob> {
+  async create(deviceId: string, uploads: AsyncIterable<UploadedFile>): Promise<OmrJob> {
     const id = uuidv7();
     const stored: (StoredSourceFile & { type: SniffedType })[] = [];
     try {
@@ -112,6 +112,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
 
     const record = this.jobs.insert({
       id,
+      deviceId,
       sourceKind: stored[0]!.type.kind === 'pdf' ? 'pdf' : 'images',
       sourceFiles: stored.map(({ type: _type, ...file }) => file),
     });
@@ -120,28 +121,31 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     return this.toJob(record);
   }
 
-  get(id: string): OmrJob {
-    return this.toJob(this.record(id));
+  get(deviceId: string, id: string): OmrJob {
+    return this.toJob(this.record(deviceId, id));
   }
 
-  /** Ревизия задачи без полного чтения; null — задачи нет. */
+  /**
+   * Ревизия задачи без полного чтения; null — задачи нет. Владельца не проверяет:
+   * SSE вызывает её после get(), который уже проверил.
+   */
   revision(id: string): number | null {
     return UUID.test(id) ? this.jobs.revision(id) : null;
   }
 
-  list(limit: number): OmrJob[] {
-    return this.jobs.list(limit).map((r) => this.toJob(r));
+  list(deviceId: string, limit: number): OmrJob[] {
+    return this.jobs.list(deviceId, limit).map((r) => this.toJob(r));
   }
 
-  cancel(id: string): OmrJob {
-    const record = this.record(id);
-    if (record.status === 'queued' && this.jobs.cancelQueued(id)) return this.get(id);
+  cancel(deviceId: string, id: string): OmrJob {
+    const record = this.record(deviceId, id);
+    if (record.status === 'queued' && this.jobs.cancelQueued(id)) return this.get(deviceId, id);
     if (record.status === 'processing') {
       this.jobs.requestCancel(id);
-      return this.get(id);
+      return this.get(deviceId, id);
     }
-    const fresh = this.record(id);
-    if (fresh.status === 'processing') return this.cancel(id);
+    const fresh = this.record(deviceId, id);
+    if (fresh.status === 'processing') return this.cancel(deviceId, id);
     throw new ApiException(
       HttpStatus.CONFLICT,
       'already_finished',
@@ -149,8 +153,8 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  async download(id: string, kind: DownloadKind) {
-    const record = this.record(id);
+  async download(deviceId: string, id: string, kind: DownloadKind) {
+    const record = this.record(deviceId, id);
     const file = DOWNLOADS[kind];
     if (!record.result) throw notReady(record);
     const data = await this.files.read(id, file.path);
@@ -158,8 +162,8 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     return { ...data, contentType: file.contentType, fileName: `omr-${id}.${file.ext}` };
   }
 
-  async page(id: string, page: number) {
-    const record = this.record(id);
+  async page(deviceId: string, id: string, page: number) {
+    const record = this.record(deviceId, id);
     if (!Number.isInteger(page) || page < 1 || page > record.pages.length) {
       throw notFound(`Страницы ${page} нет, всего страниц: ${record.pages.length}`);
     }
@@ -168,9 +172,10 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     return { ...data, contentType: 'image/png', fileName: `omr-${id}-page-${page}.png` };
   }
 
-  private record(id: string): JobRecord {
+  /** Задача устройства. Чужая задача неотличима от несуществующей: 404. */
+  private record(deviceId: string, id: string): JobRecord {
     const record = UUID.test(id) ? this.jobs.get(id) : null;
-    if (!record) throw notFound();
+    if (!record || record.deviceId !== deviceId) throw notFound();
     return record;
   }
 

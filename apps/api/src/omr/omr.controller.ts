@@ -10,8 +10,10 @@ import {
   Req,
   Res,
   StreamableFile,
+  UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiConsumes,
   ApiOkResponse,
@@ -27,12 +29,17 @@ import { OMR_TERMINAL_STATUSES, type OmrJob, type OmrJobList } from '@piano/cont
 import { ApiException } from '../common/api-exception.js';
 import { schemaRef } from '../swagger.js';
 import { OMR_CONFIG, type OmrConfig } from '../config.js';
+import type { DeviceRecord } from '../devices/device-repository.js';
+import { CurrentDevice, DeviceGuard } from '../devices/device.guard.js';
 import { OmrService, type UploadedFile } from './omr.service.js';
 
 const ERROR = { schema: schemaRef('ApiError') };
 const JOB_ID = ApiParam({ name: 'id', description: 'id задачи (UUIDv7)' });
 
 @ApiTags('omr')
+@ApiBearerAuth()
+@ApiResponse({ status: 401, description: 'unauthorized — нет токена устройства', ...ERROR })
+@UseGuards(DeviceGuard)
 @Controller('omr/jobs')
 export class OmrController {
   constructor(
@@ -68,7 +75,7 @@ export class OmrController {
   @ApiResponse({ status: 400, description: 'no_files, mixed_sources, too_many_files', ...ERROR })
   @ApiResponse({ status: 413, description: 'file_too_large', ...ERROR })
   @ApiResponse({ status: 415, description: 'unsupported_file_type', ...ERROR })
-  create(@Req() req: FastifyRequest): Promise<OmrJob> {
+  create(@CurrentDevice() device: DeviceRecord, @Req() req: FastifyRequest): Promise<OmrJob> {
     if (!req.isMultipart()) {
       throw new ApiException(
         HttpStatus.BAD_REQUEST,
@@ -76,16 +83,16 @@ export class OmrController {
         'Ожидается multipart/form-data с файлами в поле files',
       );
     }
-    return this.omr.create(fileParts(req, this.config.maxImages));
+    return this.omr.create(device.id, fileParts(req, this.config.maxImages));
   }
 
   @Get()
   @ApiOperation({ summary: 'Последние задачи' })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20 } })
   @ApiOkResponse({ schema: schemaRef('OmrJobList') })
-  list(@Query('limit') limit?: string): OmrJobList {
+  list(@CurrentDevice() device: DeviceRecord, @Query('limit') limit?: string): OmrJobList {
     const n = Math.min(Math.max(Number(limit ?? 20) || 20, 1), 100);
-    return { items: this.omr.list(n) };
+    return { items: this.omr.list(device.id, n) };
   }
 
   @Get(':id')
@@ -98,8 +105,8 @@ export class OmrController {
   })
   @ApiOkResponse({ schema: schemaRef('OmrJob') })
   @ApiResponse({ status: 404, ...ERROR })
-  get(@Param('id') id: string): OmrJob {
-    return this.omr.get(id);
+  get(@CurrentDevice() device: DeviceRecord, @Param('id') id: string): OmrJob {
+    return this.omr.get(device.id, id);
   }
 
   @Get(':id/events')
@@ -111,13 +118,19 @@ export class OmrController {
       'изменении: `progress`, в конце `done`, `failed` или `cancelled`, после чего поток ' +
       'закрывается. В `data` — задача целиком (как в GET /v1/omr/jobs/{id}), в `id` — её ' +
       'revision. Swagger покажет события только после завершения задачи; смотреть вживую — ' +
-      '`curl -N http://localhost:3000/v1/omr/jobs/{id}/events`.',
+      '`curl -N -H "Authorization: Bearer <токен>" ' +
+      'http://localhost:3000/v1/omr/jobs/{id}/events`.',
   })
   @ApiProduces('text/event-stream')
   @ApiOkResponse({ description: 'Поток text/event-stream' })
   @ApiResponse({ status: 404, ...ERROR })
-  events(@Param('id') id: string, @Req() req: FastifyRequest, @Res() reply: FastifyReply): void {
-    let last = this.omr.get(id).revision - 1; // 404 до начала потока
+  events(
+    @CurrentDevice() device: DeviceRecord,
+    @Param('id') id: string,
+    @Req() req: FastifyRequest,
+    @Res() reply: FastifyReply,
+  ): void {
+    let last = this.omr.get(device.id, id).revision - 1; // 404 до начала потока
     reply.hijack();
     const raw = reply.raw;
     raw.writeHead(200, {
@@ -141,7 +154,7 @@ export class OmrController {
       const revision = this.omr.revision(id);
       if (revision === null) return close();
       if (revision === last) return;
-      const job = this.omr.get(id);
+      const job = this.omr.get(device.id, id);
       last = job.revision;
       const terminal = OMR_TERMINAL_STATUSES.includes(job.status);
       const event = terminal ? job.status : 'progress';
@@ -166,8 +179,8 @@ export class OmrController {
   @ApiOkResponse({ schema: schemaRef('OmrJob') })
   @ApiResponse({ status: 404, ...ERROR })
   @ApiResponse({ status: 409, description: 'already_finished', ...ERROR })
-  cancel(@Param('id') id: string): OmrJob {
-    return this.omr.cancel(id);
+  cancel(@CurrentDevice() device: DeviceRecord, @Param('id') id: string): OmrJob {
+    return this.omr.cancel(device.id, id);
   }
 
   @Get(':id/result.musicxml')
@@ -179,8 +192,11 @@ export class OmrController {
   @ApiProduces('application/vnd.recordare.musicxml+xml')
   @ApiOkResponse({ schema: { type: 'string', format: 'binary' } })
   @ApiResponse({ status: 409, description: 'result_not_ready', ...ERROR })
-  async musicXml(@Param('id') id: string): Promise<StreamableFile> {
-    return toStreamable(await this.omr.download(id, 'musicxml'), 'attachment');
+  async musicXml(
+    @CurrentDevice() device: DeviceRecord,
+    @Param('id') id: string,
+  ): Promise<StreamableFile> {
+    return toStreamable(await this.omr.download(device.id, id, 'musicxml'), 'attachment');
   }
 
   @Get(':id/report.json')
@@ -192,8 +208,11 @@ export class OmrController {
   @ApiProduces('application/json')
   @ApiOkResponse({ schema: { type: 'string', format: 'binary' } })
   @ApiResponse({ status: 409, description: 'result_not_ready', ...ERROR })
-  async report(@Param('id') id: string): Promise<StreamableFile> {
-    return toStreamable(await this.omr.download(id, 'report'), 'attachment');
+  async report(
+    @CurrentDevice() device: DeviceRecord,
+    @Param('id') id: string,
+  ): Promise<StreamableFile> {
+    return toStreamable(await this.omr.download(device.id, id, 'report'), 'attachment');
   }
 
   @Get(':id/pages/:page')
@@ -203,8 +222,12 @@ export class OmrController {
   @ApiProduces('image/png')
   @ApiOkResponse({ schema: { type: 'string', format: 'binary' } })
   @ApiResponse({ status: 404, ...ERROR })
-  async page(@Param('id') id: string, @Param('page') page: string): Promise<StreamableFile> {
-    return toStreamable(await this.omr.page(id, Number(page)), 'inline');
+  async page(
+    @CurrentDevice() device: DeviceRecord,
+    @Param('id') id: string,
+    @Param('page') page: string,
+  ): Promise<StreamableFile> {
+    return toStreamable(await this.omr.page(device.id, id, Number(page)), 'inline');
   }
 }
 
