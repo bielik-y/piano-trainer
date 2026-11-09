@@ -1,5 +1,6 @@
 -- Задачи распознавания в локальном режиме (ARCHITECTURE §7.1.1).
--- Таблицу создаёт API при запуске; воркер её только читает и обновляет.
+-- Миграция 1. Таблицу создаёт API при запуске (миграции по PRAGMA user_version, см.
+-- apps/api/src/database/migrations.ts); воркер её только читает и обновляет.
 -- JSON-поля соответствуют схемам из src/index.ts: progress — OmrProgress, pages — OmrPage[],
 -- result — OmrReport, source_files — StoredSourceFile[].
 CREATE TABLE IF NOT EXISTS omr_jobs (

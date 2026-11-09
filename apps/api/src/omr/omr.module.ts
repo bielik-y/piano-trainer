@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { OMR_CONFIG, loadOmrConfig, type OmrConfig } from '../config.js';
 import { OmrController } from './omr.controller.js';
 import { OmrService } from './omr.service.js';
-import { FileStorage, LocalFileStorage } from './storage/file-storage.js';
+import { JOB_FILES, LocalFileStorage } from '../storage/file-storage.js';
 import { JobQueue, SqliteJobQueue } from './storage/job-queue.js';
 import { JobRepository } from './storage/job-repository.js';
 import { SqliteJobRepository } from './storage/sqlite-job-repository.js';
@@ -19,9 +19,9 @@ import { SqliteJobRepository } from './storage/sqlite-job-repository.js';
       useFactory: (config: OmrConfig) => new SqliteJobRepository(join(config.dataDir, 'omr.sqlite')),
     },
     {
-      provide: FileStorage,
+      provide: JOB_FILES,
       inject: [OMR_CONFIG],
-      useFactory: (config: OmrConfig) => new LocalFileStorage(config.dataDir),
+      useFactory: (config: OmrConfig) => new LocalFileStorage(join(config.dataDir, 'jobs')),
     },
     { provide: JobQueue, useClass: SqliteJobQueue },
     OmrService,

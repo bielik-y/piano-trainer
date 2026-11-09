@@ -12,7 +12,7 @@ import { ApiException, notFound } from '../common/api-exception.js';
 import { uuidv7 } from '../common/uuid.js';
 import { OMR_CONFIG, type OmrConfig } from '../config.js';
 import { sniffFileType, type SniffedType } from './file-type.js';
-import { FileStorage } from './storage/file-storage.js';
+import { FileStorage, JOB_FILES } from '../storage/file-storage.js';
 import { JobQueue } from './storage/job-queue.js';
 import { JobRepository, type JobRecord } from './storage/job-repository.js';
 
@@ -43,7 +43,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     // Токены указаны явно: Vitest не генерирует метаданные типов для DI.
     @Inject(OMR_CONFIG) private readonly config: OmrConfig,
     @Inject(JobRepository) private readonly jobs: JobRepository,
-    @Inject(FileStorage) private readonly files: FileStorage,
+    @Inject(JOB_FILES) private readonly files: FileStorage,
     @Inject(JobQueue) private readonly queue: JobQueue,
   ) {}
 
@@ -106,7 +106,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
         );
       }
     } catch (e) {
-      await this.files.removeJob(id);
+      await this.files.remove(id);
       throw e;
     }
 
@@ -210,7 +210,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     const before = new Date(Date.now() - this.config.retentionDays * 86_400_000).toISOString();
     try {
       const ids = this.jobs.deleteFinishedBefore(before);
-      await Promise.all(ids.map((id) => this.files.removeJob(id)));
+      await Promise.all(ids.map((id) => this.files.remove(id)));
       if (ids.length) this.log.log(`Удалено старых задач: ${ids.length}`);
     } catch (e) {
       this.log.warn(`Не удалось удалить старые задачи: ${String(e)}`);

@@ -129,12 +129,14 @@ def test_unreadable_file(tmp_path: Path):
 
 # --- Задача из очереди SQLite ---
 
-SCHEMA = REPO_ROOT / "packages" / "contracts" / "sql" / "omr_jobs.sql"
+# Те же миграции, что применяет API (apps/api/src/database/migrations.ts), по порядку номеров.
+MIGRATIONS = sorted((REPO_ROOT / "packages" / "contracts" / "sql").glob("omr_0*.sql"))
 
 
 def make_store(tmp_path: Path) -> JobStore:
     store = JobStore(tmp_path / "omr.sqlite")
-    store.db.executescript(SCHEMA.read_text(encoding="utf-8"))
+    for migration in MIGRATIONS:
+        store.db.executescript(migration.read_text(encoding="utf-8"))
     return store
 
 

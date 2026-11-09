@@ -1,7 +1,4 @@
-import { mkdirSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import {
   OmrErrorCode,
@@ -12,10 +9,9 @@ import {
   OmrSourceKind,
   StoredSourceFile,
 } from '@piano/contracts';
+import { OMR_MIGRATIONS } from '../../database/migrations.js';
+import { openDatabase } from '../../database/sqlite.js';
 import { JobRepository, type JobRecord, type NewJob } from './job-repository.js';
-
-const require = createRequire(import.meta.url);
-const SCHEMA_PATH = require.resolve('@piano/contracts/sql/omr_jobs.sql');
 
 const Row = z.object({
   id: z.string(),
@@ -50,10 +46,7 @@ export class SqliteJobRepository extends JobRepository {
 
   constructor(dbPath: string) {
     super();
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath, { timeout: 10_000 });
-    this.db.exec('PRAGMA journal_mode = WAL');
-    this.db.exec(readFileSync(SCHEMA_PATH, 'utf8'));
+    this.db = openDatabase(dbPath, OMR_MIGRATIONS);
   }
 
   close(): void {

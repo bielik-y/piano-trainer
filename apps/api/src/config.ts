@@ -1,9 +1,29 @@
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OMR_LIMITS } from '@piano/contracts';
 
 /** Корень репозитория: и из src/, и из dist/ это три уровня вверх. */
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+
+export interface AppConfig {
+  /** Корень данных приложения (DATA_DIR): app.sqlite и library/<pieceId>/. */
+  dataDir: string;
+  /** Устройства и библиотека пьес. */
+  appDbPath: string;
+  /** Файлы пьес: library/<pieceId>/score.musicxml. */
+  libraryDir: string;
+}
+
+export const APP_CONFIG = Symbol('APP_CONFIG');
+
+export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const dataDir = resolve(env.DATA_DIR ?? resolve(REPO_ROOT, '.data'));
+  return {
+    dataDir,
+    appDbPath: join(dataDir, 'app.sqlite'),
+    libraryDir: join(dataDir, 'library'),
+  };
+}
 
 export interface OmrConfig {
   /** Общая с воркером папка: omr.sqlite и jobs/<id>/ (ARCHITECTURE §7.1.1). */

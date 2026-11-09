@@ -1,14 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { Test } from '@nestjs/testing';
-import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { OmrJob } from '@piano/contracts';
-import { AppModule } from '../src/app.module.js';
-import { configureApp } from '../src/app.setup.js';
-import { loadOmrConfig } from '../src/config.js';
-import { setupSwagger } from '../src/swagger.js';
+import { createTestApp, type TestApp } from './helpers.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]);
@@ -39,22 +34,16 @@ describe('OMR API (e2e)', () => {
   const upload = (parts: Part[]) =>
     app.inject({ method: 'POST', url: '/v1/omr/jobs', ...multipart(parts) });
 
+  let t: TestApp;
+
   beforeEach(async () => {
-    dataDir = mkdtempSync(join(tmpdir(), 'omr-api-'));
-    process.env.OMR_DATA_DIR = dataDir;
-    process.env.OMR_EVENTS_POLL_MS = '20';
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
-    await configureApp(app, loadOmrConfig());
-    setupSwagger(app);
-    await app.init();
-    await app.getHttpAdapter().getInstance().ready();
+    t = await createTestApp();
+    app = t.app;
+    dataDir = t.omrDir;
   });
 
   afterEach(async () => {
-    await app.close();
-    delete process.env.OMR_DATA_DIR;
-    rmSync(dataDir, { recursive: true, force: true });
+    await t.close();
   });
 
   /** Делает то же, что воркер по окончании распознавания. */

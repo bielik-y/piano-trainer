@@ -1,6 +1,6 @@
 """Очередь задач в SQLite (локальный режим, ARCHITECTURE §7.1.1).
 
-Таблицу `omr_jobs` создаёт API (packages/contracts/sql/omr_jobs.sql). Воркер берёт самую старую
+Таблицу `omr_jobs` создаёт API (packages/contracts/sql/omr_0*.sql). Воркер берёт самую старую
 задачу `queued`, атомарно переводит её в `processing` и пишет в ту же запись прогресс и результат.
 Все обновления идут только при status = 'processing': если API успел отменить задачу,
 воркер её не перезапишет.
