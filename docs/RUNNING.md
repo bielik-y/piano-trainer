@@ -31,7 +31,7 @@ pnpm dev:api
 
 ### 3. Распознавание нот (OMR) через Swagger
 
-Docker не нужен: задачи хранятся в SQLite, файлы — в `.data/omr/` в корне репозитория (ARCHITECTURE §7.1.1).
+Docker не нужен: задачи хранятся в SQLite, файлы — в `.data/omr/` в корне репозитория (ARCHITECTURE §7.1.1). Библиотека и устройства — в `.data/app.sqlite`, файлы пьес — в `.data/library/`.
 
 Нужно два окна PowerShell:
 
@@ -47,22 +47,24 @@ pnpm dev:omr-worker
 
 Воркер ждёт строку «Жду задачи (homr 0.7.0)». Если API ещё не запущен, воркер пишет «Таблицы omr_jobs ещё нет» и ждёт.
 
-**Удобнее всего проверять на тестовой странице.** В третьем окне запусти `pnpm dev:omr-ui` и открой http://localhost:3100: слева загрузка файлов, статус и подозрительные такты, справа распознанные ноты и оригинал.
+**Удобнее всего проверять на тестовой странице.** В третьем окне запусти `pnpm dev:omr-ui` и открой http://localhost:3100: слева загрузка файлов, статус и подозрительные такты, справа распознанные ноты и оригинал. Токен устройства страница получает сама и хранит в `.data/omr-ui-token`.
 
-Или через Swagger, http://localhost:3000/docs:
+Или через Swagger, http://localhost:3000/docs. Все запросы, кроме health, требуют токен устройства:
 
-1. **POST /v1/omr/jobs** → Try it out → в `files` выбери один PDF или до 10 фото (кнопка «Add string item» добавляет ещё файл) → Execute. Скопируй `id` из ответа.
+0. **POST /v1/devices** → Execute → скопируй `token` (`pt_…`). Нажми **Authorize** вверху страницы, вставь токен → Authorize. Swagger запомнит его до очистки браузера. Без токена ответ — 401 `unauthorized`.
+1. **POST /v1/omr/jobs** → Try it out → в `files` выбери один PDF или до 10 фото (кнопка «Add string item» добавляет ещё файл), в `timeSignature` — размер, если автоматически он определяется неверно → Execute. Скопируй `id` из ответа.
 2. **GET /v1/omr/jobs/{id}** — статус и прогресс: `queued` → `processing` (в `progress` видно страницу и процент) → `done` / `failed` / `cancelled`. Страница распознаётся примерно 25–50 с.
 3. **GET /v1/omr/jobs/{id}/result.musicxml** — в ответе появится ссылка «Download file». Файл открывается в MuseScore.
 4. **GET /v1/omr/jobs/{id}/report.json** — какие такты подозрительны и почему; **GET …/pages/{page}** — картинка страницы, которую получил движок.
 5. **POST /v1/omr/jobs/{id}/cancel** — отмена.
+6. **POST /v1/pieces/from-omr** с телом `{"jobId": "<id>"}` — добавить результат в библиотеку. Дальше **GET /v1/pieces**, **PATCH/DELETE /v1/pieces/{id}**, **GET /v1/pieces/{id}/score.musicxml**.
 
 Если нормальных тактов меньше 40 %, задача получает `failed` с `error.code = low_quality`, но MusicXML всё равно скачивается. Порог меняется переменной `OMR_MIN_OK_RATIO`.
 
 Прогресс вживую (SSE) удобнее смотреть не в Swagger, а в PowerShell:
 
 ```powershell
-curl.exe -N http://localhost:3000/v1/omr/jobs/<id>/events
+curl.exe -N -H "Authorization: Bearer <токен>" http://localhost:3000/v1/omr/jobs/<id>/events
 ```
 
 Без API распознать файл одной командой:
@@ -70,6 +72,8 @@ curl.exe -N http://localhost:3000/v1/omr/jobs/<id>/events
 ```powershell
 cd D:\Projects\piano-trainer\services\omr-worker
 uv run omr-worker recognize "C:\путь\к\нотам.pdf" --out omr-out
+# размер задан вручную:
+uv run omr-worker recognize "C:\путь\к\нотам.pdf" --out omr-out --time-signature 3/4
 ```
 
 homr живёт в отдельном окружении `services/omr-worker/bench/envs/homr` (его создаёт бенчмарк); другой путь задаётся переменной `OMR_HOMR_EXE`. Если `uv` не в PATH, `pnpm dev:omr-worker` ищет его сам.

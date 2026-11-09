@@ -11,7 +11,7 @@
 pnpm-монорепо + Turborepo. Пакеты `@piano/*`.
 
 - `apps/mobile` — Expo (SDK 58) + expo-router, iOS + Android, только dev client. Свои правила в `apps/mobile/AGENTS.md`: Expo-API сверять с документацией нужной версии SDK, нативные пакеты ставить через `npx expo install`, не трогать `ios/`/`android/` (CNG).
-- `apps/api` — NestJS 12 + Fastify, ESM (импорты с суффиксом `.js`), Vitest. В MVP только `health` и `omr`.
+- `apps/api` — NestJS 12 + Fastify, ESM (импорты с суффиксом `.js`), Vitest. Модули: `health`, `devices` (анонимный токен), `omr`, `pieces` (библиотека). SQLite через `node:sqlite`, миграции — SQL-файлы в `packages/contracts/sql`.
 - `packages/score-core` — модель партитуры (`PracticeScore`), MusicXML/MXL/MEI, фрагменты, проверка тактов.
 - `packages/practice-engine` — матчер нот (режимы `wait`/`tempo`), оценка попыток, статусы фрагментов, повторения, уроки, стрики.
 - `packages/notation-view` — бандл WebView с Verovio + протокол моста `protocol.ts`.
@@ -24,7 +24,7 @@ pnpm-монорепо + Turborepo. Пакеты `@piano/*`.
 - `score-core` и `practice-engine` — чистый TS: никаких импортов React, RN или Node. Вся музыкальная логика живёт там и покрывается тестами Vitest на фикстурах.
 - Сопоставление нот считается по нативным меткам времени MIDI на шкале аудио-часов, а не по времени прихода события в JS.
 - WebView нотного стана только рисует и подсвечивает; решения принимает `practice-engine`.
-- Offline-first: данные пользователя хранятся в SQLite на устройстве. Сущности имеют UUIDv7, `updatedAt`, `deletedAt`, попытки — append-only.
+- Offline-first: библиотека пьес хранится на сервере (источник правды), телефон держит её кэш в SQLite и синхронизирует по `updatedSince`; прогресс, попытки и стрики пока только на устройстве. Сущности имеют UUIDv7, `updatedAt`, `deletedAt`, попытки — append-only.
 - Внутренние пакеты подключаются из исходников (`exports` → `src/index.ts`), без шага сборки.
 - `nodeLinker: hoisted` в `pnpm-workspace.yaml` нужен для Metro, не меняй его.
 - UI-тексты и документация на русском, идентификаторы в коде на английском.
