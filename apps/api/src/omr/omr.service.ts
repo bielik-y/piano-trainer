@@ -7,7 +7,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import type { Readable } from 'node:stream';
-import { OmrJob, OmrJobOptions, type StoredSourceFile } from '@piano/contracts';
+import { OmrJob, OmrJobOptions, type OmrReport, type StoredSourceFile } from '@piano/contracts';
 import { ApiException, notFound } from '../common/api-exception.js';
 import { uuidv7 } from '../common/uuid.js';
 import { OMR_CONFIG, type OmrConfig } from '../config.js';
@@ -171,6 +171,21 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     const data = await this.files.read(id, file.path);
     if (!data) throw notReady(record);
     return { ...data, contentType: file.contentType, fileName: `omr-${id}.${file.ext}` };
+  }
+
+  /**
+   * Результат задачи для библиотеки: отчёт и поток MusicXML. Есть при done и при failed с
+   * low_quality, иначе — 409 result_not_ready.
+   */
+  async result(
+    deviceId: string,
+    id: string,
+  ): Promise<{ report: OmrReport; musicXml: Readable; size: number }> {
+    const record = this.record(deviceId, id);
+    if (!record.result) throw notReady(record);
+    const data = await this.files.read(id, DOWNLOADS.musicxml.path);
+    if (!data) throw notReady(record);
+    return { report: record.result, musicXml: data.stream, size: data.size };
   }
 
   async page(deviceId: string, id: string, page: number) {
