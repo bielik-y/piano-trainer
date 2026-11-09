@@ -108,6 +108,32 @@ def set_time_signature(music_xml: str, beats: int, beat_type: int) -> str:
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 
+def replace_time_signature(music_xml: str, beats: int, beat_type: int) -> str:
+    """Один размер на всю пьесу: убирает все <time> и ставит заданный в первый такт."""
+    root = ET.fromstring(music_xml.encode("utf-8"))
+    for measure in root.iter("measure"):
+        for attributes in measure.findall("attributes"):
+            for time in attributes.findall("time"):
+                attributes.remove(time)
+            if len(attributes) == 0:
+                measure.remove(attributes)
+    for part in root.findall("part"):
+        first = part.find("measure")
+        if first is not None:
+            insert_time(first, beats, beat_type)
+    return ET.tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def parse_time_signature(value: str | None) -> tuple[int, int] | None:
+    """'3/4' → (3, 4); None, 'auto' и всё непохожее на размер → None."""
+    if not value or "/" not in value:
+        return None
+    beats, _, beat_type = value.partition("/")
+    if not (beats.isdigit() and beat_type.isdigit()) or int(beats) < 1 or int(beat_type) < 1:
+        return None
+    return int(beats), int(beat_type)
+
+
 def insert_time(measure: ET.Element, beats: int, beat_type: int) -> None:
     """Добавляет в такт <time>; по схеме MusicXML он идёт сразу после <divisions> и <key>."""
     time = ET.Element("time")

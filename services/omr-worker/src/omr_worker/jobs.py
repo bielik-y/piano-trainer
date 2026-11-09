@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .merge import parse_time_signature
 from .models import ErrorCode, PageInfo, Progress, Report
 
 
@@ -23,6 +24,8 @@ def now_iso() -> str:
 class ClaimedJob:
     id: str
     source_paths: list[str]  # относительно папки задачи
+    # Размер из OmrJobOptions.timeSignature; None — определить по нотам (auto).
+    time_signature: tuple[int, int] | None = None
 
 
 class JobStore:
@@ -62,13 +65,18 @@ class JobStore:
                WHERE id = (SELECT id FROM omr_jobs WHERE status = 'queued'
                            ORDER BY created_at, id LIMIT 1)
                  AND status = 'queued'
-               RETURNING id, source_files""",
+               RETURNING id, source_files, options""",
             (now, now),
         ).fetchone()
         if row is None:
             return None
         files = json.loads(row["source_files"])
-        return ClaimedJob(id=row["id"], source_paths=[f["path"] for f in files])
+        options = json.loads(row["options"]) if row["options"] else {}
+        return ClaimedJob(
+            id=row["id"],
+            source_paths=[f["path"] for f in files],
+            time_signature=parse_time_signature(options.get("timeSignature")),
+        )
 
     def is_cancel_requested(self, job_id: str) -> bool:
         row = self.db.execute(

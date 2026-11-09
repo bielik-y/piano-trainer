@@ -6,7 +6,12 @@ from omr_worker.measures import (
     measures_from_score,
     parse_score,
 )
-from omr_worker.merge import merge_pages, set_time_signature
+from omr_worker.merge import (
+    merge_pages,
+    parse_time_signature,
+    replace_time_signature,
+    set_time_signature,
+)
 from omr_worker.pipeline import run_pipeline
 
 from .fixtures import measure, score
@@ -119,3 +124,46 @@ def test_pipeline_leaves_unknown_when_not_enough_measures(tmp_path: Path):
     assert report.time_signature is None
     assert report.time_signature_source is None
     assert report.quality == "low"
+
+
+# --- Размер, заданный пользователем ---
+
+
+def test_parse_time_signature():
+    assert parse_time_signature("3/4") == (3, 4)
+    assert parse_time_signature("12/8") == (12, 8)
+    for value in (None, "", "auto", "3", "0/4", "a/b"):
+        assert parse_time_signature(value) is None
+
+
+def test_replace_time_signature_leaves_one_time():
+    second = in_three(2).replace(
+        ">", "><attributes><time><beats>2</beats><beat-type>4</beat-type></time></attributes>", 1
+    )
+    xml = score(measure(1, [("C5", 8), ("E5", 8)], [("C3", 16)], time="4/4"), second)
+
+    result = replace_time_signature(xml, 3, 4)
+
+    assert result.count("<time>") == 1
+    assert "<beats>3</beats>" in result
+    assert "<attributes />" not in result and "<attributes></attributes>" not in result
+
+
+def test_pipeline_uses_user_time_signature(tmp_path: Path):
+    pdf = make_pdf(tmp_path / "in.pdf", pages=1)
+    # Движок ошибся: написал 4/4, а такты по три четверти.
+    first = measure(1, [("C5", 4), ("D5", 4), ("E5", 4)], [("C3", 4), ("E3", 4), ("G3", 4)],
+                    time="4/4")
+    engine = FakeEngine([score(first, *(in_three(n) for n in range(2, 7)))])
+
+    output = run_pipeline(
+        [pdf], tmp_path / "job", engine, min_ok_ratio=0.4, dpi=50, time_signature=(3, 4)
+    )
+
+    report = output.report
+    assert report.time_signature == "3/4"
+    assert report.time_signature_source == "user"
+    assert report.ok_measure_count == 6
+    music_xml = output.music_xml.read_text(encoding="utf-8")
+    assert music_xml.count("<time>") == 1
+    assert "<beats>3</beats>" in music_xml

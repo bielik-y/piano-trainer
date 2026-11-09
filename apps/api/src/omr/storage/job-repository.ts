@@ -1,5 +1,6 @@
 import type {
   OmrErrorCode,
+  OmrJobOptions,
   OmrJobStatus,
   OmrPage,
   OmrProgress,
@@ -21,6 +22,7 @@ export interface JobRecord {
   finishedAt: string | null;
   sourceKind: OmrSourceKind;
   sourceFiles: StoredSourceFile[];
+  options: OmrJobOptions;
   progress: OmrProgress | null;
   pages: OmrPage[];
   result: OmrReport | null;
@@ -33,6 +35,7 @@ export interface NewJob {
   deviceId: string;
   sourceKind: OmrSourceKind;
   sourceFiles: StoredSourceFile[];
+  options: OmrJobOptions;
 }
 
 /**

@@ -140,12 +140,12 @@ def make_store(tmp_path: Path) -> JobStore:
     return store
 
 
-def add_job(store: JobStore, job_id: str, files: list[dict]) -> None:
+def add_job(store: JobStore, job_id: str, files: list[dict], options: dict | None = None) -> None:
     now = now_iso()
     store.db.execute(
-        "INSERT INTO omr_jobs (id, status, created_at, updated_at, source_kind, source_files)"
-        " VALUES (?, 'queued', ?, ?, 'images', ?)",
-        (job_id, now, now, json.dumps(files)),
+        "INSERT INTO omr_jobs (id, status, created_at, updated_at, source_kind, source_files,"
+        " options) VALUES (?, 'queued', ?, ?, 'images', ?, ?)",
+        (job_id, now, now, json.dumps(files), json.dumps(options) if options else None),
     )
 
 
@@ -178,6 +178,15 @@ def test_job_is_claimed_and_finished(tmp_path: Path):
     assert json.loads(result["result"])["measureCount"] == 3
     assert json.loads(result["progress"])["percent"] == 100
     assert result["revision"] >= 3
+
+
+def test_claim_reads_time_signature_option(tmp_path: Path):
+    store = make_store(tmp_path)
+    add_job(store, "a", [], {"timeSignature": "6/8"})
+    add_job(store, "b", [], {"timeSignature": "auto"})
+    add_job(store, "c", [])
+
+    assert [store.claim().time_signature for _ in range(3)] == [(6, 8), None, None]  # type: ignore[union-attr]
 
 
 def test_cancel_requested_job(tmp_path: Path):

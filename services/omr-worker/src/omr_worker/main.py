@@ -17,6 +17,7 @@ from pathlib import Path
 from .config import Settings, load_settings
 from .engines.cli import HomrEngine
 from .jobs import JobStore
+from .merge import parse_time_signature
 from .models import Cancelled, OmrFailure, PageInfo, Progress
 from .pipeline import run_pipeline
 
@@ -67,7 +68,7 @@ class JobListener:
 
 
 def process_job(store: JobStore, settings: Settings, engine: HomrEngine, job_id: str,
-                source_paths: list[str]) -> None:
+                source_paths: list[str], time_signature: tuple[int, int] | None = None) -> None:
     job_dir = settings.job_dir(job_id)
     listener = JobListener(store, job_id)
     try:
@@ -79,6 +80,7 @@ def process_job(store: JobStore, settings: Settings, engine: HomrEngine, job_id:
             dpi=settings.raster_dpi,
             max_pdf_pages=settings.max_pdf_pages,
             listener=listener,
+            time_signature=time_signature,
         )
     except Cancelled:
         store.mark_cancelled(job_id, listener.pages)
@@ -121,15 +123,18 @@ def serve(settings: Settings) -> None:
             if job is None:
                 time.sleep(settings.poll_interval_s)
                 continue
-            log.info("%s: взята в работу", job.id)
-            process_job(store, settings, engine, job.id, job.source_paths)
+            log.info("%s: взята в работу%s", job.id,
+                     f", размер {job.time_signature[0]}/{job.time_signature[1]}"
+                     if job.time_signature else "")
+            process_job(store, settings, engine, job.id, job.source_paths, job.time_signature)
     except KeyboardInterrupt:
         log.info("Остановлен")
     finally:
         store.close()
 
 
-def recognize(settings: Settings, files: list[Path], out: Path) -> int:
+def recognize(settings: Settings, files: list[Path], out: Path,
+              time_signature: tuple[int, int] | None = None) -> int:
     engine = make_engine(settings)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -157,6 +162,7 @@ def recognize(settings: Settings, files: list[Path], out: Path) -> int:
             dpi=settings.raster_dpi,
             max_pdf_pages=settings.max_pdf_pages,
             listener=Printer(),
+            time_signature=time_signature,
         )
     except OmrFailure as e:
         print(f"Ошибка {e.code}: {e.message}", file=sys.stderr)
@@ -180,13 +186,20 @@ def cli(argv: list[str] | None = None) -> int:
     rec = commands.add_parser("recognize", help="распознать файлы без API")
     rec.add_argument("files", nargs="+", type=Path, help="1 PDF или фото по порядку страниц")
     rec.add_argument("--out", type=Path, default=Path("omr-out"), help="папка результата")
+    rec.add_argument("--time-signature", metavar="N/M",
+                     help="размер пьесы, например 3/4; по умолчанию определяется по нотам")
     args = parser.parse_args(argv)
 
     settings = load_settings()
     if args.command == "serve":
         serve(settings)
         return 0
-    return recognize(settings, args.files, args.out)
+    time_signature = None
+    if args.time_signature:
+        time_signature = parse_time_signature(args.time_signature)
+        if time_signature is None:
+            parser.error(f"--time-signature: ожидается размер вида 3/4, получено {args.time_signature}")
+    return recognize(settings, args.files, args.out, time_signature)
 
 
 def main() -> None:

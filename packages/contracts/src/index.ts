@@ -19,6 +19,22 @@ export type OmrJobStatus = z.infer<typeof OmrJobStatus>;
 
 export const OMR_TERMINAL_STATUSES: readonly OmrJobStatus[] = ['done', 'failed', 'cancelled'];
 
+/** Размер, который пользователь выбрал при загрузке; auto — определить по нотам. */
+export const TimeSignatureChoice = z.enum(['auto', '2/4', '3/4', '4/4', '6/8', '12/8']);
+export type TimeSignatureChoice = z.infer<typeof TimeSignatureChoice>;
+
+/** Параметры распознавания: multipart-поля `POST /v1/omr/jobs` рядом с файлами. */
+export const OmrJobOptions = z
+  .object({
+    /**
+     * Не auto — размер ставится на всю пьесу вместо найденного движком, такты проверяются по
+     * нему, смены размера посреди пьесы не ищутся. В отчёте timeSignatureSource = user.
+     */
+    timeSignature: TimeSignatureChoice.default('auto'),
+  })
+  .meta({ id: 'OmrJobOptions' });
+export type OmrJobOptions = z.infer<typeof OmrJobOptions>;
+
 export const OmrStage = z.enum(['preprocessing', 'recognizing', 'merging', 'validating']);
 export type OmrStage = z.infer<typeof OmrStage>;
 
@@ -74,8 +90,11 @@ export const OmrReport = z.object({
   quality: z.enum(['ok', 'low']),
   staffCount: z.number().int().nonnegative(),
   timeSignature: z.string().nullable(),
-  /** engine — знак размера нашёл движок, inferred — вычислен по длинам тактов (предположение). */
-  timeSignatureSource: z.enum(['engine', 'inferred']).nullable().default(null),
+  /**
+   * engine — знак размера нашёл движок, inferred — вычислен по длинам тактов (предположение),
+   * user — задан при загрузке (OmrJobOptions.timeSignature).
+   */
+  timeSignatureSource: z.enum(['engine', 'inferred', 'user']).nullable().default(null),
   /** Знаки при ключе: > 0 — диезы, < 0 — бемоли. */
   keyFifths: z.number().int().nullable(),
   title: z.string().nullable().default(null),
@@ -135,6 +154,7 @@ export const OmrJob = z
       kind: OmrSourceKind,
       files: z.array(OmrSourceFile),
     }),
+    options: OmrJobOptions,
     progress: OmrProgress.nullable(),
     pages: z.array(OmrPage),
     /** Есть при done, а также при failed с кодом low_quality. */
@@ -168,6 +188,7 @@ export const ApiErrorCode = z.enum([
   'already_finished',
   'bad_request',
   'unauthorized',
+  'invalid_option',
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCode>;
 

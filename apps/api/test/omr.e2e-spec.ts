@@ -1,38 +1,26 @@
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { OmrJob } from '@piano/contracts';
-import { createTestApp, registerDevice, type TestApp } from './helpers.js';
-
-const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]);
-const PDF = Buffer.from('%PDF-1.7\n%test');
-
-type Part = { name: string; data: Buffer; type?: string };
-
-function multipart(parts: Part[], extraHeaders: Record<string, string> = {}) {
-  const boundary = '----piano-test-boundary';
-  const chunks = parts.flatMap((p) => [
-    Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="${p.name}"\r\n` +
-        `Content-Type: ${p.type ?? 'application/octet-stream'}\r\n\r\n`,
-    ),
-    p.data,
-    Buffer.from('\r\n'),
-  ]);
-  return {
-    payload: Buffer.concat([...chunks, Buffer.from(`--${boundary}--\r\n`)]),
-    headers: { ...extraHeaders, 'content-type': `multipart/form-data; boundary=${boundary}` },
-  };
-}
+import {
+  JPEG,
+  PDF,
+  PNG,
+  createTestApp,
+  finishJob as finish,
+  jobDirs,
+  multipart,
+  registerDevice,
+  type Part,
+  type TestApp,
+} from './helpers.js';
 
 describe('OMR API (e2e)', () => {
   let app: NestFastifyApplication;
   let dataDir: string;
 
-  const upload = (parts: Part[]) =>
-    app.inject({ method: 'POST', url: '/v1/omr/jobs', ...multipart(parts, auth) });
+  const upload = (parts: Part[], fields: Record<string, string> = {}) =>
+    app.inject({ method: 'POST', url: '/v1/omr/jobs', ...multipart(parts, fields, auth) });
+  const finishJob = (id: string, status: 'done' | 'failed', errorCode: string | null = null) =>
+    finish(dataDir, id, status, errorCode);
 
   let t: TestApp;
   let auth: { authorization: string };
@@ -48,46 +36,6 @@ describe('OMR API (e2e)', () => {
     await t.close();
   });
 
-  /** Делает то же, что воркер по окончании распознавания. */
-  function finishJob(id: string, status: 'done' | 'failed', errorCode: string | null = null) {
-    const db = new DatabaseSync(join(dataDir, 'omr.sqlite'));
-    const report = {
-      measureCount: 2,
-      okMeasureCount: 1,
-      okRatio: 0.5,
-      minOkRatio: 0.4,
-      quality: 'ok',
-      staffCount: 2,
-      timeSignature: '4/4',
-      keyFifths: 0,
-      suspiciousMeasures: [{ index: 1, number: '2', page: 1, reasons: ['overflow'] }],
-      engine: { name: 'homr', version: '0.7.0' },
-    };
-    const page = {
-      index: 1,
-      status: 'done',
-      width: 10,
-      height: 10,
-      measureCount: 2,
-      seconds: 1.5,
-      error: null,
-    };
-    db.prepare(
-      `UPDATE omr_jobs SET status = ?, result = ?, pages = ?, error_code = ?, error_message = ?,
-         started_at = updated_at, finished_at = updated_at, revision = revision + 2 WHERE id = ?`,
-    ).run(
-      status,
-      JSON.stringify(report),
-      JSON.stringify([page]),
-      errorCode,
-      errorCode ? 'плохо' : null,
-      id,
-    );
-    db.close();
-    writeFileSync(join(dataDir, 'jobs', id, 'result.musicxml'), '<score-partwise/>');
-    writeFileSync(join(dataDir, 'jobs', id, 'report.json'), JSON.stringify(report));
-  }
-
   it('создаёт задачу из фото и отдаёт её', async () => {
     const res = await upload([
       { name: 'стр1.jpg', data: JPEG },
@@ -95,7 +43,12 @@ describe('OMR API (e2e)', () => {
     ]);
     expect(res.statusCode).toBe(201);
     const job = OmrJob.parse(res.json());
-    expect(job).toMatchObject({ status: 'queued', source: { kind: 'images' }, result: null });
+    expect(job).toMatchObject({
+      status: 'queued',
+      source: { kind: 'images' },
+      options: { timeSignature: 'auto' },
+      result: null,
+    });
     expect(job.source.files.map((f) => [f.name, f.contentType])).toEqual([
       ['стр1.jpg', 'image/jpeg'],
       ['стр2.png', 'image/png'],
@@ -111,6 +64,31 @@ describe('OMR API (e2e)', () => {
     const res = await upload([{ name: 'ноты.pdf', data: PDF }]);
     expect(res.statusCode).toBe(201);
     expect(res.json().source.kind).toBe('pdf');
+  });
+
+  it('сохраняет размер, выбранный при загрузке', async () => {
+    const res = await upload([{ name: 'a.png', data: PNG }], { timeSignature: '3/4' });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().options).toEqual({ timeSignature: '3/4' });
+    const got = await app.inject({
+      method: 'GET',
+      headers: auth,
+      url: `/v1/omr/jobs/${res.json().id}`,
+    });
+    expect(got.json().options.timeSignature).toBe('3/4');
+    // Пустое поле (так шлёт Swagger) — значение по умолчанию.
+    const empty = await upload([{ name: 'a.png', data: PNG }], { timeSignature: '' });
+    expect(empty.json().options.timeSignature).toBe('auto');
+  });
+
+  it('отклоняет неизвестный размер и не оставляет файлов', async () => {
+    const res = await upload([{ name: 'a.png', data: PNG }], { timeSignature: '7/4' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'invalid_option' });
+    expect(res.json().message).toContain('3/4');
+    const list = await app.inject({ method: 'GET', headers: auth, url: '/v1/omr/jobs' });
+    expect(list.json().items).toEqual([]);
+    expect(jobDirs(dataDir)).toEqual([]);
   });
 
   it.each<[string, Part[], number, string]>([

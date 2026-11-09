@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import {
   OmrErrorCode,
+  OmrJobOptions,
   OmrJobStatus,
   OmrPage,
   OmrProgress,
@@ -24,6 +25,7 @@ const Row = z.object({
   finished_at: z.string().nullable(),
   source_kind: OmrSourceKind,
   source_files: z.string(),
+  options: z.string().nullable(),
   progress: z.string().nullable(),
   pages: z.string().nullable(),
   result: z.string().nullable(),
@@ -59,10 +61,19 @@ export class SqliteJobRepository extends JobRepository {
     this.db
       .prepare(
         `INSERT INTO omr_jobs
-           (id, device_id, status, created_at, updated_at, source_kind, source_files, pages)
-         VALUES (?, ?, 'queued', ?, ?, ?, ?, '[]')`,
+           (id, device_id, status, created_at, updated_at, source_kind, source_files, options,
+            pages)
+         VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, '[]')`,
       )
-      .run(job.id, job.deviceId, at, at, job.sourceKind, JSON.stringify(job.sourceFiles));
+      .run(
+        job.id,
+        job.deviceId,
+        at,
+        at,
+        job.sourceKind,
+        JSON.stringify(job.sourceFiles),
+        JSON.stringify(job.options),
+      );
     return this.get(job.id)!;
   }
 
@@ -132,6 +143,7 @@ function toRecord(raw: unknown): JobRecord {
     finishedAt: row.finished_at,
     sourceKind: row.source_kind,
     sourceFiles: z.array(StoredSourceFile).parse(JSON.parse(row.source_files)),
+    options: json(OmrJobOptions, row.options) ?? OmrJobOptions.parse({}),
     progress: json(OmrProgress, row.progress),
     pages: json(z.array(OmrPage), row.pages) ?? [],
     result: json(OmrReport, row.result),

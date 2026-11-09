@@ -7,7 +7,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import type { Readable } from 'node:stream';
-import { OmrJob, type StoredSourceFile } from '@piano/contracts';
+import { OmrJob, OmrJobOptions, type StoredSourceFile } from '@piano/contracts';
 import { ApiException, notFound } from '../common/api-exception.js';
 import { uuidv7 } from '../common/uuid.js';
 import { OMR_CONFIG, type OmrConfig } from '../config.js';
@@ -16,10 +16,13 @@ import { FileStorage, JOB_FILES } from '../storage/file-storage.js';
 import { JobQueue } from './storage/job-queue.js';
 import { JobRepository, type JobRecord } from './storage/job-repository.js';
 
-export interface UploadedFile {
-  filename: string;
-  stream: Readable;
-}
+/** Часть multipart-запроса: файл или текстовое поле (параметр распознавания). */
+export type UploadPart =
+  | { kind: 'file'; filename: string; stream: Readable }
+  | { kind: 'field'; name: string; value: string };
+
+/** Поля multipart, которые становятся OmrJobOptions. Остальные поля игнорируются. */
+const OPTION_FIELDS = new Set<string>(OmrJobOptions.keyof().options);
 
 export type DownloadKind = 'musicxml' | 'report';
 
@@ -57,11 +60,17 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     clearInterval(this.purgeTimer);
   }
 
-  async create(deviceId: string, uploads: AsyncIterable<UploadedFile>): Promise<OmrJob> {
+  async create(deviceId: string, parts: AsyncIterable<UploadPart>): Promise<OmrJob> {
     const id = uuidv7();
     const stored: (StoredSourceFile & { type: SniffedType })[] = [];
+    const fields: Record<string, string> = {};
+    let options: OmrJobOptions;
     try {
-      for await (const upload of uploads) {
+      for await (const upload of parts) {
+        if (upload.kind === 'field') {
+          if (OPTION_FIELDS.has(upload.name)) fields[upload.name] = upload.value;
+          continue;
+        }
         if (stored.length >= this.config.maxImages) {
           upload.stream.resume();
           throw tooManyFiles(this.config.maxImages);
@@ -105,6 +114,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
           'Можно загрузить либо один PDF, либо фото — не вместе и не несколько PDF',
         );
       }
+      options = parseOptions(fields);
     } catch (e) {
       await this.files.remove(id);
       throw e;
@@ -115,6 +125,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
       deviceId,
       sourceKind: stored[0]!.type.kind === 'pdf' ? 'pdf' : 'images',
       sourceFiles: stored.map(({ type: _type, ...file }) => file),
+      options,
     });
     await this.queue.enqueue(id);
     this.log.log(`${id}: создана, файлов ${stored.length}`);
@@ -197,6 +208,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
           contentType,
         })),
       },
+      options: record.options,
       progress: record.progress,
       pages: record.pages,
       result: record.result
@@ -221,6 +233,23 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
       this.log.warn(`Не удалось удалить старые задачи: ${String(e)}`);
     }
   }
+}
+
+function parseOptions(fields: Record<string, string>): OmrJobOptions {
+  // Пустое поле формы — то же, что не заданное (Swagger отправляет пустую строку).
+  const given = Object.fromEntries(Object.entries(fields).filter(([, v]) => v.trim() !== ''));
+  const parsed = OmrJobOptions.safeParse(
+    Object.fromEntries(Object.entries(given).map(([k, v]) => [k, v.trim()])),
+  );
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0]!;
+  const field = String(issue.path[0] ?? '');
+  const allowed = 'values' in issue ? ` Допустимо: ${issue.values.join(', ')}` : '';
+  throw new ApiException(
+    HttpStatus.BAD_REQUEST,
+    'invalid_option',
+    `Поле ${field}: недопустимое значение «${given[field] ?? ''}».${allowed}`,
+  );
 }
 
 function tooManyFiles(max: number) {

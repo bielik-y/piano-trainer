@@ -67,8 +67,9 @@ class Report(Model):
     quality: Literal["ok", "low"]
     staff_count: int
     time_signature: str | None = None
-    # engine — знак размера нашёл движок, inferred — вычислен по длинам тактов.
-    time_signature_source: Literal["engine", "inferred"] | None = None
+    # engine — знак размера нашёл движок, inferred — вычислен по длинам тактов,
+    # user — задан пользователем при загрузке (OmrJobOptions.timeSignature).
+    time_signature_source: Literal["engine", "inferred", "user"] | None = None
     key_fifths: int | None = None
     title: str | None = None
     composer: str | None = None

@@ -25,13 +25,18 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { OMR_TERMINAL_STATUSES, type OmrJob, type OmrJobList } from '@piano/contracts';
+import {
+  OMR_TERMINAL_STATUSES,
+  TimeSignatureChoice,
+  type OmrJob,
+  type OmrJobList,
+} from '@piano/contracts';
 import { ApiException } from '../common/api-exception.js';
 import { schemaRef } from '../swagger.js';
 import { OMR_CONFIG, type OmrConfig } from '../config.js';
 import type { DeviceRecord } from '../devices/device-repository.js';
 import { CurrentDevice, DeviceGuard } from '../devices/device.guard.js';
-import { OmrService, type UploadedFile } from './omr.service.js';
+import { OmrService, type UploadPart } from './omr.service.js';
 
 const ERROR = { schema: schemaRef('ApiError') };
 const JOB_ID = ApiParam({ name: 'id', description: 'id задачи (UUIDv7)' });
@@ -54,7 +59,8 @@ export class OmrController {
     description:
       'Загрузите **один PDF** (до 20 страниц) или **от 1 до 10 фото** одной композиции ' +
       '(JPEG, PNG, HEIC) в порядке страниц, каждый файл до 25 МБ. Тип определяется по ' +
-      'содержимому. Задача сразу встаёт в очередь; дальше следите за ней через ' +
+      'содержимому. Необязательное поле `timeSignature` задаёт размер, если автоматически ' +
+      'он определяется неверно. Задача сразу встаёт в очередь; дальше следите за ней через ' +
       '`GET /v1/omr/jobs/{id}` или поток `GET /v1/omr/jobs/{id}/events`.',
   })
   @ApiConsumes('multipart/form-data')
@@ -68,11 +74,21 @@ export class OmrController {
           items: { type: 'string', format: 'binary' },
           description: '1 PDF или 1–10 фото',
         },
+        timeSignature: {
+          type: 'string',
+          enum: TimeSignatureChoice.options,
+          default: 'auto',
+          description: 'Размер пьесы; auto — определить по нотам',
+        },
       },
     },
   })
   @ApiResponse({ status: 201, description: 'Задача создана', schema: schemaRef('OmrJob') })
-  @ApiResponse({ status: 400, description: 'no_files, mixed_sources, too_many_files', ...ERROR })
+  @ApiResponse({
+    status: 400,
+    description: 'no_files, mixed_sources, too_many_files, invalid_option',
+    ...ERROR,
+  })
   @ApiResponse({ status: 413, description: 'file_too_large', ...ERROR })
   @ApiResponse({ status: 415, description: 'unsupported_file_type', ...ERROR })
   create(@CurrentDevice() device: DeviceRecord, @Req() req: FastifyRequest): Promise<OmrJob> {
@@ -83,7 +99,7 @@ export class OmrController {
         'Ожидается multipart/form-data с файлами в поле files',
       );
     }
-    return this.omr.create(device.id, fileParts(req, this.config.maxImages));
+    return this.omr.create(device.id, uploadParts(req, this.config.maxImages));
   }
 
   @Get()
@@ -231,10 +247,15 @@ export class OmrController {
   }
 }
 
-async function* fileParts(req: FastifyRequest, maxImages: number): AsyncIterable<UploadedFile> {
+async function* uploadParts(req: FastifyRequest, maxImages: number): AsyncIterable<UploadPart> {
   try {
     for await (const part of req.parts()) {
-      if (part.type === 'file') yield { filename: part.filename, stream: part.file };
+      if (part.type === 'file') {
+        yield { kind: 'file', filename: part.filename, stream: part.file };
+      } else {
+        const value = typeof part.value === 'string' ? part.value : '';
+        yield { kind: 'field', name: part.fieldname, value };
+      }
     }
   } catch (e) {
     if ((e as { code?: string }).code === 'FST_FILES_LIMIT') {
