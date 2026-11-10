@@ -202,6 +202,49 @@ describe('OMR API (e2e)', () => {
     expect(OmrJob.parse(JSON.parse(data.slice(6))).status).toBe('done');
   });
 
+  it('задаёт задаче постоянный оттенок сферы', async () => {
+    const { id, hue } = (await upload([{ name: 'a.png', data: PNG }])).json();
+    expect(Number.isInteger(hue) && hue >= 0 && hue < 360).toBe(true);
+    const again = await app.inject({ method: 'GET', headers: auth, url: `/v1/omr/jobs/${id}` });
+    expect(again.json().hue).toBe(hue);
+  });
+
+  it('inbox: карточки для библиотеки до скрытия', async () => {
+    const working = (await upload([{ name: 'a.png', data: PNG }])).json().id;
+    const failed = (await upload([{ name: 'b.png', data: PNG }])).json().id;
+    const cancelled = (await upload([{ name: 'c.png', data: PNG }])).json().id;
+    finishJob(failed, 'failed', 'no_music_found');
+    await app.inject({ method: 'POST', headers: auth, url: `/v1/omr/jobs/${cancelled}/cancel` });
+    const inbox = async () =>
+      (await app.inject({ method: 'GET', headers: auth, url: '/v1/omr/jobs?inbox=true' }))
+        .json()
+        .items.map((j: { id: string }) => j.id)
+        .sort();
+
+    expect(await inbox()).toEqual([working, failed].sort());
+
+    const busy = await app.inject({
+      method: 'POST',
+      headers: auth,
+      url: `/v1/omr/jobs/${working}/dismiss`,
+    });
+    expect(busy.statusCode).toBe(409);
+    expect(busy.json().code).toBe('not_finished');
+
+    for (let i = 0; i < 2; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        headers: auth,
+        url: `/v1/omr/jobs/${failed}/dismiss`,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().dismissedAt).not.toBeNull();
+    }
+    expect(await inbox()).toEqual([working]);
+    const all = await app.inject({ method: 'GET', headers: auth, url: '/v1/omr/jobs' });
+    expect(all.json().items).toHaveLength(3);
+  });
+
   it('без токена устройства — 401', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/omr/jobs' });
     expect(res.statusCode).toBe(401);

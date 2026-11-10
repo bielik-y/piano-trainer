@@ -177,6 +177,10 @@ export const OmrJob = z
       files: z.array(OmrSourceFile),
     }),
     options: OmrJobOptions,
+    /** Оттенок сферы-обложки, 0–359; у пьесы из этой задачи тот же. */
+    hue: z.number().int().min(0).max(359),
+    /** Карточка убрана с экрана библиотеки (пьеса добавлена или ошибка просмотрена). */
+    dismissedAt: z.iso.datetime().nullable(),
     progress: OmrProgress.nullable(),
     pages: z.array(OmrPage),
     /** Есть при done, а также при failed с кодом low_quality. */
@@ -212,6 +216,7 @@ export const ApiErrorCode = z.enum([
   'unauthorized',
   'invalid_option',
   'invalid_request',
+  'not_finished',
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCode>;
 

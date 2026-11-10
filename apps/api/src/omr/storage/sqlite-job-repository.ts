@@ -26,6 +26,8 @@ const Row = z.object({
   source_kind: OmrSourceKind,
   source_files: z.string(),
   options: z.string().nullable(),
+  hue: z.number().nullable(),
+  dismissed_at: z.string().nullable(),
   progress: z.string().nullable(),
   pages: z.string().nullable(),
   result: z.string().nullable(),
@@ -62,8 +64,8 @@ export class SqliteJobRepository extends JobRepository {
       .prepare(
         `INSERT INTO omr_jobs
            (id, device_id, status, created_at, updated_at, source_kind, source_files, options,
-            pages)
-         VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, '[]')`,
+            hue, pages)
+         VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, '[]')`,
       )
       .run(
         job.id,
@@ -73,6 +75,7 @@ export class SqliteJobRepository extends JobRepository {
         job.sourceKind,
         JSON.stringify(job.sourceFiles),
         JSON.stringify(job.options),
+        job.hue,
       );
     return this.get(job.id)!;
   }
@@ -88,13 +91,25 @@ export class SqliteJobRepository extends JobRepository {
     return row ? row.revision : null;
   }
 
-  list(deviceId: string, limit: number): JobRecord[] {
+  list(deviceId: string, limit: number, inbox = false): JobRecord[] {
+    const filter = inbox ? "AND dismissed_at IS NULL AND status <> 'cancelled'" : '';
     return this.db
       .prepare(
-        'SELECT * FROM omr_jobs WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT ?',
+        `SELECT * FROM omr_jobs WHERE device_id = ? ${filter}
+         ORDER BY created_at DESC, id DESC LIMIT ?`,
       )
       .all(deviceId, limit)
       .map(toRecord);
+  }
+
+  dismiss(id: string): void {
+    const at = now();
+    this.db
+      .prepare(
+        `UPDATE omr_jobs SET dismissed_at = ?, updated_at = ?, revision = revision + 1
+         WHERE id = ? AND dismissed_at IS NULL`,
+      )
+      .run(at, at, id);
   }
 
   cancelQueued(id: string): boolean {
@@ -144,6 +159,8 @@ function toRecord(raw: unknown): JobRecord {
     sourceKind: row.source_kind,
     sourceFiles: z.array(StoredSourceFile).parse(JSON.parse(row.source_files)),
     options: json(OmrJobOptions, row.options) ?? OmrJobOptions.parse({}),
+    hue: row.hue,
+    dismissedAt: row.dismissed_at,
     progress: json(OmrProgress, row.progress),
     pages: json(z.array(OmrPage), row.pages) ?? [],
     result: json(OmrReport, row.result),

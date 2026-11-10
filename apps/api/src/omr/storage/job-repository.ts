@@ -23,6 +23,9 @@ export interface JobRecord {
   sourceKind: OmrSourceKind;
   sourceFiles: StoredSourceFile[];
   options: OmrJobOptions;
+  /** null у задач, созданных до миграции omr_003. */
+  hue: number | null;
+  dismissedAt: string | null;
   progress: OmrProgress | null;
   pages: OmrPage[];
   result: OmrReport | null;
@@ -36,6 +39,7 @@ export interface NewJob {
   sourceKind: OmrSourceKind;
   sourceFiles: StoredSourceFile[];
   options: OmrJobOptions;
+  hue: number;
 }
 
 /**
@@ -47,8 +51,13 @@ export abstract class JobRepository {
   abstract get(id: string): JobRecord | null;
   /** Ревизия без чтения всей записи — для SSE. */
   abstract revision(id: string): number | null;
-  /** Последние задачи устройства, новые первыми. */
-  abstract list(deviceId: string, limit: number): JobRecord[];
+  /**
+   * Последние задачи устройства, новые первыми. inbox — только карточки для экрана библиотеки:
+   * не скрытые и не отменённые.
+   */
+  abstract list(deviceId: string, limit: number, inbox?: boolean): JobRecord[];
+  /** Скрыть задачу из библиотеки; повторный вызов ничего не меняет. */
+  abstract dismiss(id: string): void;
   /** queued → cancelled. true, если задача ещё ждала в очереди. */
   abstract cancelQueued(id: string): boolean;
   /** Для задачи в работе: попросить воркер остановиться. */

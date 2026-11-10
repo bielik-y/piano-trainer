@@ -103,12 +103,23 @@ export class OmrController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Последние задачи' })
+  @ApiOperation({
+    summary: 'Последние задачи',
+    description:
+      'С inbox=true — только карточки для экрана библиотеки: в очереди, в работе и ' +
+      'завершённые, которые ещё не скрыты (`POST …/dismiss`, или пьеса добавлена). ' +
+      'queued/processing — «Оцифровка», failed — «Ошибка».',
+  })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20 } })
+  @ApiQuery({ name: 'inbox', required: false, schema: { type: 'boolean', default: false } })
   @ApiOkResponse({ schema: schemaRef('OmrJobList') })
-  list(@CurrentDevice() device: DeviceRecord, @Query('limit') limit?: string): OmrJobList {
+  list(
+    @CurrentDevice() device: DeviceRecord,
+    @Query('limit') limit?: string,
+    @Query('inbox') inbox?: string,
+  ): OmrJobList {
     const n = Math.min(Math.max(Number(limit ?? 20) || 20, 1), 100);
-    return { items: this.omr.list(device.id, n) };
+    return { items: this.omr.list(device.id, n, inbox === 'true' || inbox === '1') };
   }
 
   @Get(':id')
@@ -197,6 +208,22 @@ export class OmrController {
   @ApiResponse({ status: 409, description: 'already_finished', ...ERROR })
   cancel(@CurrentDevice() device: DeviceRecord, @Param('id') id: string): OmrJob {
     return this.omr.cancel(device.id, id);
+  }
+
+  @Post(':id/dismiss')
+  @HttpCode(HttpStatus.OK)
+  @JOB_ID
+  @ApiOperation({
+    summary: 'Убрать карточку задачи из библиотеки',
+    description:
+      'Например, пользователь посмотрел ошибку распознавания. Задача остаётся доступной по id ' +
+      'до автоудаления. При добавлении пьесы (`POST /v1/pieces/from-omr`) скрывается сама.',
+  })
+  @ApiOkResponse({ schema: schemaRef('OmrJob') })
+  @ApiResponse({ status: 404, ...ERROR })
+  @ApiResponse({ status: 409, description: 'not_finished — задача ещё распознаётся', ...ERROR })
+  dismiss(@CurrentDevice() device: DeviceRecord, @Param('id') id: string): OmrJob {
+    return this.omr.dismiss(device.id, id);
   }
 
   @Get(':id/result.musicxml')

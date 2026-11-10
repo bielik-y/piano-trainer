@@ -6,6 +6,7 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
+import { createHash, randomInt } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { OmrJob, OmrJobOptions, type OmrReport, type StoredSourceFile } from '@piano/contracts';
 import { ApiException, notFound } from '../common/api-exception.js';
@@ -126,6 +127,7 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
       sourceKind: stored[0]!.type.kind === 'pdf' ? 'pdf' : 'images',
       sourceFiles: stored.map(({ type: _type, ...file }) => file),
       options,
+      hue: randomInt(360),
     });
     await this.queue.enqueue(id);
     this.log.log(`${id}: создана, файлов ${stored.length}`);
@@ -144,8 +146,25 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
     return UUID.test(id) ? this.jobs.revision(id) : null;
   }
 
-  list(deviceId: string, limit: number): OmrJob[] {
-    return this.jobs.list(deviceId, limit).map((r) => this.toJob(r));
+  list(deviceId: string, limit: number, inbox = false): OmrJob[] {
+    return this.jobs.list(deviceId, limit, inbox).map((r) => this.toJob(r));
+  }
+
+  /**
+   * Убрать карточку задачи с экрана библиотеки. Только у завершённой задачи: в работе её
+   * сначала отменяют. Повторный вызов — без ошибки.
+   */
+  dismiss(deviceId: string, id: string): OmrJob {
+    const record = this.record(deviceId, id);
+    if (record.status === 'queued' || record.status === 'processing') {
+      throw new ApiException(
+        HttpStatus.CONFLICT,
+        'not_finished',
+        'Задача ещё распознаётся: сначала отмените её (POST …/cancel)',
+      );
+    }
+    this.jobs.dismiss(id);
+    return this.get(deviceId, id);
   }
 
   cancel(deviceId: string, id: string): OmrJob {
@@ -180,12 +199,17 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
   async result(
     deviceId: string,
     id: string,
-  ): Promise<{ report: OmrReport; musicXml: Readable; size: number }> {
+  ): Promise<{ report: OmrReport; hue: number; musicXml: Readable; size: number }> {
     const record = this.record(deviceId, id);
     if (!record.result) throw notReady(record);
     const data = await this.files.read(id, DOWNLOADS.musicxml.path);
     if (!data) throw notReady(record);
-    return { report: record.result, musicXml: data.stream, size: data.size };
+    return {
+      report: record.result,
+      hue: jobHue(record),
+      musicXml: data.stream,
+      size: data.size,
+    };
   }
 
   async page(deviceId: string, id: string, page: number) {
@@ -224,6 +248,8 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
         })),
       },
       options: record.options,
+      hue: jobHue(record),
+      dismissedAt: record.dismissedAt,
       progress: record.progress,
       pages: record.pages,
       result: record.result
@@ -248,6 +274,11 @@ export class OmrService implements OnModuleInit, OnModuleDestroy {
       this.log.warn(`Не удалось удалить старые задачи: ${String(e)}`);
     }
   }
+}
+
+/** Оттенок задачи; у задач до миграции omr_003 его нет — постоянный, из id. */
+function jobHue(record: JobRecord): number {
+  return record.hue ?? createHash('sha256').update(record.id).digest().readUInt16BE(0) % 360;
 }
 
 function parseOptions(fields: Record<string, string>): OmrJobOptions {
