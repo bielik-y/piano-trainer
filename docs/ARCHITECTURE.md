@@ -244,7 +244,8 @@ Swagger ──► api (NestJS) ──► .data/omr/omr.sqlite (таблица om
 - Пустые нотоносцы (заготовки без нот) закрашиваются до распознавания, страница без нот не считается ошибкой, такт без нот и пауз удаляется при склейке (`omr_worker/empty_staves.py`, `merge.py`): такие такты не попадают в партитуру и в подсчёт качества.
 - Проверка находит подозрительные такты: сумма длительностей по голосу ≠ размеру (кроме короткого дополнительного голоса, когда другой голос нотоносца заполняет такт), событие выходит за конец такта, такта нет на одном из нотоносцев, пустой такт, неизвестен размер. Размер, напечатанный только на первой странице, действует на всех следующих. Если движок не нашёл знак размера, размер вычисляется по самой частой длине такта без первого и последнего (нужно не меньше 4 тактов и не меньше 60 % с одной длиной) и помечается в отчёте как `inferred`.
 - Для OMR проверку делает воркер (`omr_worker/measures.py`, её же использует бенчмарк) и кладёт результат в `report.json` с причинами по каждому такту. `score-core.validateMeasures()` на TS появится вместе с импортом MusicXML в приложение (фаза 2) и должна давать тот же результат.
-- Индексы подозрительных тактов записываются в `pieces.unscoredMeasures`; при отображении такие такты помечаются («возможна ошибка распознавания»). (Не приоритет: в режиме игры они не оцениваются, §6.)
+- У каждого подозрительного такта в отчёте есть подробности, чтобы приложение объяснило ошибку словами: `staff` — нотоносец без такта (2 — «Партия левой руки не распознана»), `length` и `expectedLength` в четвертях (12/8, length 5.5, expectedLength 6 — «В такте 11 восьмых вместо 12»). Тексты собирает приложение. Смены размера посреди пьесы — `timeSignatureChanges` («5/4 в такте 3»).
+- Подозрительные такты целиком копируются в пьесу (`Piece.suspiciousMeasures` — список ошибок на странице произведения), их индексы — в `pieces.unscoredMeasures`; при отображении такие такты помечаются («возможна ошибка распознавания»). (Не приоритет: в режиме игры они не оцениваются, §6.)
 - **Порог:** если нормальных тактов меньше 40 % (`OMR_MIN_OK_RATIO`), задача завершается `failed` с кодом `low_quality`: «Не удалось надёжно распознать, попробуйте PDF лучшего качества или файл MusicXML». MusicXML и отчёт при этом всё равно можно скачать — для отладки.
 - Экран результата: превью нот с помеченными тактами, кнопки «Добавить в библиотеку» (`POST /v1/pieces/from-omr`) и «Отмена».
 - Проверка работает для любого источника, в том числе для импортированного MusicXML.
@@ -270,10 +271,11 @@ Swagger UI — `/docs`, схема OpenAPI — `/docs-json`. Схемы отве
 | GET | `/v1/health` | Живость |
 | POST | `/v1/devices` | Анонимное устройство → `{deviceId, token}` |
 | POST | `/v1/omr/jobs` | multipart `files`: 1 PDF или 1–10 фото по порядку страниц, необязательное `timeSignature` → задача `queued` |
-| GET | `/v1/omr/jobs` | Последние задачи |
+| GET | `/v1/omr/jobs` | Последние задачи; `inbox=true` — карточки для экрана библиотеки |
 | GET | `/v1/omr/jobs/:id` | Задача: статус, прогресс, страницы, результат или ошибка |
 | GET | `/v1/omr/jobs/:id/events` | SSE: `progress` при каждом изменении, в конце `done`, `failed` или `cancelled`; в `data` — вся задача |
 | POST | `/v1/omr/jobs/:id/cancel` | Отмена |
+| POST | `/v1/omr/jobs/:id/dismiss` | Убрать карточку задачи из библиотеки (завершённой; в работе — 409 `not_finished`) |
 | GET | `/v1/omr/jobs/:id/result.musicxml` | Скачать результат (есть при `done` и при `failed` с `low_quality`) |
 | GET | `/v1/omr/jobs/:id/report.json` | Отчёт по тактам |
 | GET | `/v1/omr/jobs/:id/pages/:page` | Страница после предобработки (PNG) |
@@ -281,10 +283,11 @@ Swagger UI — `/docs`, схема OpenAPI — `/docs-json`. Схемы отве
 | GET | `/v1/pieces` | Пьесы устройства: `q`, `updatedSince`, `cursor`, `limit` |
 | GET | `/v1/pieces/:id` | Пьеса |
 | PATCH | `/v1/pieces/:id` | Переименовать: `title`, `composer` |
+| POST | `/v1/pieces/:id/opened` | Первое открытие: `openedAt`, тег «Новое» пропадает |
 | DELETE | `/v1/pieces/:id` | Мягкое удаление |
 | GET | `/v1/pieces/:id/score.musicxml` | MusicXML пьесы, `ETag` / 304 |
 
-Статусы задачи: `queued → processing → done | failed | cancelled`. Коды ошибок: `low_quality`, `unreadable_file`, `too_many_pages`, `no_music_found`, `engine_failed`, `timeout`, `interrupted`. Ошибки запроса — `{code, message}`: `no_files`, `unsupported_file_type`, `mixed_sources`, `too_many_files`, `file_too_large`, `invalid_option`, `invalid_request`, `unauthorized` (401).
+Статусы задачи: `queued → processing → done | failed | cancelled`. Коды ошибок: `low_quality`, `unreadable_file`, `too_many_pages`, `no_music_found`, `engine_failed`, `timeout`, `interrupted`. Ошибки запроса — `{code, message}`: `no_files`, `unsupported_file_type`, `mixed_sources`, `too_many_files`, `file_too_large`, `invalid_option`, `invalid_request`, `not_finished` (409), `unauthorized` (401).
 
 В MVP вместо аккаунта используется **анонимный device token**: приложение при первом запуске вызывает `POST /v1/devices` и шлёт токен в каждом запросе (`Authorization: Bearer pt_…`). В базе лежит только sha256 токена. Задачи OMR и пьесы принадлежат устройству; чужие отвечают 404. Задачи, созданные до токенов, не видны никому. Rate limit на OMR — позже. Потом появятся `auth` (Sign in with Apple / Google / email-ссылка, токен устройства привязывается к аккаунту) и `sync` для прогресса (попытки — только append).
 
@@ -293,6 +296,12 @@ Swagger UI — `/docs`, схема OpenAPI — `/docs-json`. Схемы отве
 - Первый запуск: `GET /v1/pieces` постранично (`cursor = nextCursor`), сохранить `serverTime`.
 - Дальше: `GET /v1/pieces?updatedSince=<serverTime>` — все изменённые с того момента, включая удалённые (`deletedAt` не null → убрать из кэша). Граница включительная, поэтому пьеса может прийти повторно — запись в кэш идёт upsert'ом по `id`.
 - Партитура: `GET scoreUrl` с `If-None-Match` — 304, если файл не менялся.
+- Экран библиотеки (макет — docs/DESIGN.md) = пьесы из кэша + `GET /v1/omr/jobs?inbox=true`:
+  - задача `queued`/`processing` → карточка «Оцифровка» с прогрессом («Распознано 2 из 3 страниц» — `pages`);
+  - задача `failed` → «Ошибка»; после просмотра — `POST …/dismiss`;
+  - `POST /v1/pieces/from-omr` превращает карточку задачи в пьесу и сам скрывает задачу;
+  - пьеса с `openedAt = null` → «Новое»; при открытии — `POST /v1/pieces/:id/opened`;
+  - цвет сферы — `hue`, один у задачи и у пьесы из неё.
 - Без сети приложение работает с кэшем; изменения (переименование, удаление) пока только онлайн.
 
 ## 9. Мобильное приложение: навигация
