@@ -40,7 +40,7 @@ export class PiecesService {
     const existing = this.existingForJob(deviceId, body.jobId);
     if (existing) return { piece: existing, created: false };
 
-    const { report, musicXml } = await this.omr.result(deviceId, body.jobId);
+    const { report, hue, musicXml } = await this.omr.result(deviceId, body.jobId);
     const id = uuidv7();
     await this.files.write(id, SCORE_PATH, musicXml);
     const record = this.pieces.insert({
@@ -54,8 +54,11 @@ export class PiecesService {
       scorePath: SCORE_PATH,
       measureCount: report.measureCount,
       unscoredMeasures: report.suspiciousMeasures.map((m) => m.index),
+      suspiciousMeasures: report.suspiciousMeasures,
       timeSignature: report.timeSignature,
       timeSignatureSource: report.timeSignatureSource,
+      timeSignatureChanges: report.timeSignatureChanges,
+      hue,
       keyFifths: report.keyFifths,
       tempoText: report.tempoText,
       tempoBpm: report.tempoBpm,
@@ -68,6 +71,8 @@ export class PiecesService {
       if (!winner) throw new Error(`пьеса из задачи ${body.jobId} пропала`);
       return { piece: winner, created: false };
     }
+    // Карточка «Оцифровка» на экране библиотеки сменяется пьесой.
+    this.omr.dismiss(deviceId, body.jobId);
     this.log.log(`${id}: добавлена из задачи ${body.jobId}`);
     return { piece: toPiece(record), created: true };
   }
@@ -106,6 +111,14 @@ export class PiecesService {
       new Date().toISOString(),
     );
     return toPiece(record!);
+  }
+
+  /** Пьесу открыли: снимается тег «Новое». Повторный вызов время не меняет. */
+  markOpened(deviceId: string, id: string): Piece {
+    const record = this.live(deviceId, id);
+    if (record.openedAt) return toPiece(record);
+    const at = new Date().toISOString();
+    return toPiece(this.pieces.update(id, { openedAt: at }, at)!);
   }
 
   /** Мягкое удаление; повторное — без ошибки. Файл партитуры остаётся. */
@@ -160,8 +173,11 @@ function toPiece(record: PieceRecord): Piece {
     omrJobId: record.omrJobId,
     measureCount: record.measureCount,
     unscoredMeasures: record.unscoredMeasures,
+    suspiciousMeasures: record.suspiciousMeasures,
     timeSignature: record.timeSignature,
     timeSignatureSource: record.timeSignatureSource,
+    timeSignatureChanges: record.timeSignatureChanges,
+    hue: record.hue,
     keyFifths: record.keyFifths,
     tempoText: record.tempoText,
     tempoBpm: record.tempoBpm,
@@ -169,6 +185,7 @@ function toPiece(record: PieceRecord): Piece {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     deletedAt: record.deletedAt,
+    openedAt: record.openedAt,
     lastPracticedAt: record.lastPracticedAt,
   });
 }

@@ -8,4 +8,4 @@ export const OMR_MIGRATIONS = [
   'omr_003_hue_dismissed.sql',
 ] as const;
 
-export const APP_MIGRATIONS = ['app_001_devices_pieces.sql'] as const;
+export const APP_MIGRATIONS = ['app_001_devices_pieces.sql', 'app_002_piece_details.sql'] as const;

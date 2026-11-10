@@ -141,6 +141,21 @@ export class PiecesController {
     return this.pieces.update(device.id, id, parse(UpdatePiece, body));
   }
 
+  @Post(':id/opened')
+  @HttpCode(HttpStatus.OK)
+  @PIECE_ID
+  @ApiOperation({
+    summary: 'Отметить, что пьесу открыли',
+    description:
+      'Вызывается при первом открытии страницы произведения: openedAt перестаёт быть null, ' +
+      'и у карточки пропадает тег «Новое». Повторный вызов ничего не меняет.',
+  })
+  @ApiOkResponse({ schema: schemaRef('Piece') })
+  @ApiResponse({ status: 404, ...ERROR })
+  opened(@CurrentDevice() device: DeviceRecord, @Param('id') id: string): Piece {
+    return this.pieces.markOpened(device.id, id);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @PIECE_ID

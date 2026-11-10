@@ -1,6 +1,11 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { z } from 'zod';
-import { PieceSourceKind, TimeSignatureSource } from '@piano/contracts';
+import {
+  PieceSourceKind,
+  SuspiciousMeasure,
+  TimeSignatureChange,
+  TimeSignatureSource,
+} from '@piano/contracts';
 
 /** Запись пьесы в хранилище (без ссылок — их добавляет сервис). */
 export interface PieceRecord {
@@ -14,18 +19,25 @@ export interface PieceRecord {
   scorePath: string;
   measureCount: number;
   unscoredMeasures: number[];
+  suspiciousMeasures: SuspiciousMeasure[];
   timeSignature: string | null;
   timeSignatureSource: TimeSignatureSource | null;
+  timeSignatureChanges: TimeSignatureChange[];
+  hue: number;
   keyFifths: number | null;
   tempoText: string | null;
   tempoBpm: number | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  openedAt: string | null;
   lastPracticedAt: string | null;
 }
 
-export type NewPiece = Omit<PieceRecord, 'updatedAt' | 'deletedAt' | 'lastPracticedAt'>;
+export type NewPiece = Omit<
+  PieceRecord,
+  'updatedAt' | 'deletedAt' | 'openedAt' | 'lastPracticedAt'
+>;
 
 export interface PieceQuery {
   deviceId: string;
@@ -42,6 +54,7 @@ export interface PiecePatch {
   title?: string;
   composer?: string | null;
   deletedAt?: string | null;
+  openedAt?: string;
 }
 
 /**
@@ -67,14 +80,18 @@ const Row = z.object({
   score_path: z.string(),
   measure_count: z.number(),
   unscored_measures: z.string(),
+  suspicious_measures: z.string(),
   time_signature: z.string().nullable(),
   time_signature_source: TimeSignatureSource.nullable(),
+  time_signature_changes: z.string(),
+  hue: z.number(),
   key_fifths: z.number().nullable(),
   tempo_text: z.string().nullable(),
   tempo_bpm: z.number().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
   deleted_at: z.string().nullable(),
+  opened_at: z.string().nullable(),
   last_practiced_at: z.string().nullable(),
 });
 
@@ -90,14 +107,20 @@ function toRecord(raw: unknown): PieceRecord {
     scorePath: row.score_path,
     measureCount: row.measure_count,
     unscoredMeasures: z.array(z.number().int()).parse(JSON.parse(row.unscored_measures)),
+    suspiciousMeasures: z.array(SuspiciousMeasure).parse(JSON.parse(row.suspicious_measures)),
     timeSignature: row.time_signature,
     timeSignatureSource: row.time_signature_source,
+    timeSignatureChanges: z
+      .array(TimeSignatureChange)
+      .parse(JSON.parse(row.time_signature_changes)),
+    hue: row.hue,
     keyFifths: row.key_fifths,
     tempoText: row.tempo_text,
     tempoBpm: row.tempo_bpm,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
+    openedAt: row.opened_at,
     lastPracticedAt: row.last_practiced_at,
   };
 }
@@ -118,9 +141,10 @@ export class SqlitePieceRepository extends PieceRepository {
       this.db
         .prepare(
           `INSERT INTO pieces (id, device_id, title, composer, search_text, source_kind,
-             omr_job_id, score_path, measure_count, unscored_measures, time_signature,
-             time_signature_source, key_fifths, tempo_text, tempo_bpm, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             omr_job_id, score_path, measure_count, unscored_measures, suspicious_measures,
+             time_signature, time_signature_source, time_signature_changes, hue, key_fifths,
+             tempo_text, tempo_bpm, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           piece.id,
@@ -133,8 +157,11 @@ export class SqlitePieceRepository extends PieceRepository {
           piece.scorePath,
           piece.measureCount,
           JSON.stringify(piece.unscoredMeasures),
+          JSON.stringify(piece.suspiciousMeasures),
           piece.timeSignature,
           piece.timeSignatureSource,
+          JSON.stringify(piece.timeSignatureChanges),
+          piece.hue,
           piece.keyFifths,
           piece.tempoText,
           piece.tempoBpm,
@@ -188,13 +215,14 @@ export class SqlitePieceRepository extends PieceRepository {
     const title = patch.title ?? current.title;
     const composer = patch.composer === undefined ? current.composer : patch.composer;
     const deletedAt = patch.deletedAt === undefined ? current.deletedAt : patch.deletedAt;
+    const openedAt = patch.openedAt ?? current.openedAt;
     this.db
       .prepare(
         `UPDATE pieces SET title = ?, composer = ?, search_text = ?, deleted_at = ?,
-           updated_at = ?
+           opened_at = ?, updated_at = ?
          WHERE id = ?`,
       )
-      .run(title, composer, searchText(title, composer), deletedAt, at, id);
+      .run(title, composer, searchText(title, composer), deletedAt, openedAt, at, id);
     return this.get(id);
   }
 }

@@ -2,6 +2,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { OmrJob } from '@piano/contracts';
 import {
   JPEG,
+  byText,
   PDF,
   PNG,
   createTestApp,
@@ -219,9 +220,9 @@ describe('OMR API (e2e)', () => {
       (await app.inject({ method: 'GET', headers: auth, url: '/v1/omr/jobs?inbox=true' }))
         .json()
         .items.map((j: { id: string }) => j.id)
-        .sort();
+        .sort(byText);
 
-    expect(await inbox()).toEqual([working, failed].sort());
+    expect(await inbox()).toEqual([working, failed].sort(byText));
 
     const busy = await app.inject({
       method: 'POST',

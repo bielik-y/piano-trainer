@@ -4,6 +4,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Piece, PieceList } from '@piano/contracts';
 import {
   PNG,
+  byText,
   TEST_MUSICXML,
   TEST_REPORT,
   createTestApp,
@@ -81,6 +82,45 @@ describe('Библиотека (e2e)', () => {
         scoreUrl: `/v1/pieces/${piece.id}/score.musicxml`,
       });
       expect(existsSync(join(t.dataDir, 'library', piece.id, 'score.musicxml'))).toBe(true);
+    });
+
+    it('переносит ошибки тактов, смены размера и оттенок; убирает карточку задачи', async () => {
+      const jobId = await recognizedJob();
+      const job = (await request('GET', `/v1/omr/jobs/${jobId}`)).json();
+      const inbox = async () =>
+        (await request('GET', '/v1/omr/jobs?inbox=true'))
+          .json()
+          .items.map((j: { id: string }) => j.id);
+      expect(await inbox()).toEqual([jobId]);
+
+      const piece = Piece.parse((await request('POST', '/v1/pieces/from-omr', { jobId })).json());
+      expect(piece.hue).toBe(job.hue);
+      expect(piece.openedAt).toBeNull();
+      expect(piece.timeSignatureChanges).toEqual([{ index: 1, number: '2', timeSignature: '5/4' }]);
+      expect(piece.suspiciousMeasures).toEqual([
+        {
+          index: 1,
+          number: '2',
+          page: 1,
+          reasons: ['overflow'],
+          staff: null,
+          length: 4.5,
+          expectedLength: 4,
+        },
+      ]);
+      expect(await inbox()).toEqual([]);
+    });
+
+    it('читает отчёт без подробностей (задачи до обновления воркера)', async () => {
+      const { timeSignatureChanges: _changes, ...old } = TEST_REPORT;
+      const jobId = await recognizedJob('done', null, {
+        ...old,
+        suspiciousMeasures: [{ index: 1, number: '2', page: 1, reasons: ['empty'] }],
+      });
+      const res = await request('POST', '/v1/pieces/from-omr', { jobId });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().timeSignatureChanges).toEqual([]);
+      expect(res.json().suspiciousMeasures[0]).toMatchObject({ staff: null, length: null });
     });
 
     it('берёт название и автора из запроса, без названия — «Без названия»', async () => {
@@ -171,6 +211,17 @@ describe('Библиотека (e2e)', () => {
     expect((await request('PATCH', `/v1/pieces/${piece.id}`, { title: 'x' })).statusCode).toBe(404);
   });
 
+  it('отметка открытия снимает «Новое» один раз', async () => {
+    const piece = await addPiece();
+    const first = await request('POST', `/v1/pieces/${piece.id}/opened`);
+    expect(first.statusCode).toBe(200);
+    const openedAt = first.json().openedAt;
+    expect(openedAt).not.toBeNull();
+    expect(first.json().updatedAt >= piece.updatedAt).toBe(true);
+    const again = await request('POST', `/v1/pieces/${piece.id}/opened`);
+    expect(again.json().openedAt).toBe(openedAt);
+  });
+
   it('пьесы другого устройства не видны', async () => {
     const piece = await addPiece();
     const other = await registerDevice(app);
@@ -197,7 +248,7 @@ describe('Библиотека (e2e)', () => {
           (await request('GET', `/v1/pieces?q=${encodeURIComponent(q)}`)).json(),
         ).items.map((p) => p.title);
       expect(await titles('ЛУННАЯ')).toEqual(['Лунная соната']);
-      expect((await titles('бетховен')).sort()).toEqual(['К Элизе', 'Лунная соната']);
+      expect((await titles('бетховен')).sort(byText)).toEqual(['К Элизе', 'Лунная соната']);
       expect(await titles('100%')).toEqual([]);
     });
 
@@ -212,7 +263,7 @@ describe('Библиотека (e2e)', () => {
         seen.push(...page.items.map((p) => p.title));
         cursor = page.nextCursor;
       } while (cursor);
-      expect(seen.sort()).toEqual(['Пьеса 0', 'Пьеса 1', 'Пьеса 2', 'Пьеса 3', 'Пьеса 4']);
+      expect(seen.sort(byText)).toEqual(['Пьеса 0', 'Пьеса 1', 'Пьеса 2', 'Пьеса 3', 'Пьеса 4']);
 
       const bad = await request('GET', '/v1/pieces?cursor=мусор');
       expect(bad.json().code).toBe('invalid_request');

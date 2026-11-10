@@ -102,7 +102,10 @@ export const TEST_REPORT = {
   composer: 'Л. ван Бетховен',
   tempoText: 'Adagio sostenuto',
   tempoBpm: 52,
-  suspiciousMeasures: [{ index: 1, number: '2', page: 1, reasons: ['overflow'] }],
+  timeSignatureChanges: [{ index: 1, number: '2', timeSignature: '5/4' }],
+  suspiciousMeasures: [
+    { index: 1, number: '2', page: 1, reasons: ['overflow'], length: 4.5, expectedLength: 4 },
+  ],
   engine: { name: 'homr', version: '0.7.0' },
 };
 
@@ -150,3 +153,6 @@ export function jobDirs(omrDir: string): string[] {
     return [];
   }
 }
+
+/** Сравнение строк для sort: без него порядок зависит от реализации. */
+export const byText = (a: string, b: string) => a.localeCompare(b);

@@ -253,8 +253,13 @@ export const Piece = z
     measureCount: z.number().int().nonnegative(),
     /** Индексы тактов (с 0), которые не оцениваются при игре: подозрительные после OMR. */
     unscoredMeasures: z.array(z.number().int().nonnegative()),
+    /** Ошибки распознавания по тактам — список на странице произведения. */
+    suspiciousMeasures: z.array(SuspiciousMeasure),
     timeSignature: z.string().nullable(),
     timeSignatureSource: TimeSignatureSource.nullable(),
+    timeSignatureChanges: z.array(TimeSignatureChange),
+    /** Оттенок сферы-обложки, 0–359: постоянный, тот же, что у задачи распознавания. */
+    hue: z.number().int().min(0).max(359),
     keyFifths: z.number().int().nullable(),
     tempoText: z.string().nullable(),
     tempoBpm: z.number().int().positive().nullable(),
@@ -264,6 +269,8 @@ export const Piece = z
     updatedAt: z.iso.datetime(),
     /** Не null — пьеса удалена; такие приходят только в списке с updatedSince. */
     deletedAt: z.iso.datetime().nullable(),
+    /** Первое открытие; null — у карточки тег «Новое». */
+    openedAt: z.iso.datetime().nullable(),
     lastPracticedAt: z.iso.datetime().nullable(),
   })
   .meta({ id: 'Piece' });
