@@ -76,8 +76,25 @@ export const SuspiciousMeasure = z.object({
   number: z.string(),
   page: z.number().int().positive(),
   reasons: z.array(MeasureIssueReason),
+  /** missing_on_staff: нотоносец без такта, с 1 (2 — обычно левая рука). */
+  staff: z.number().int().positive().nullable().default(null),
+  /**
+   * В четвертях. overflow — где кончается последнее событие; duration_mismatch — длина неверного
+   * голоса. «В такте 11 восьмых вместо 12» в 12/8: length 5.5, expectedLength 6.
+   */
+  length: z.number().nonnegative().nullable().default(null),
+  /** Длина такта по размеру, в четвертях. */
+  expectedLength: z.number().positive().nullable().default(null),
 });
 export type SuspiciousMeasure = z.infer<typeof SuspiciousMeasure>;
+
+/** Смена размера посреди пьесы: с такта index действует timeSignature. */
+export const TimeSignatureChange = z.object({
+  index: z.number().int().nonnegative(),
+  number: z.string(),
+  timeSignature: z.string(),
+});
+export type TimeSignatureChange = z.infer<typeof TimeSignatureChange>;
 
 /**
  * Откуда размер: engine — знак размера нашёл движок, inferred — вычислен по длинам тактов
@@ -98,6 +115,8 @@ export const OmrReport = z.object({
   staffCount: z.number().int().nonnegative(),
   timeSignature: z.string().nullable(),
   timeSignatureSource: TimeSignatureSource.nullable().default(null),
+  /** Смены размера после первого такта; возврат к исходному сменой не считается. */
+  timeSignatureChanges: z.array(TimeSignatureChange).default([]),
   /** Знаки при ключе: > 0 — диезы, < 0 — бемоли. */
   keyFifths: z.number().int().nullable(),
   title: z.string().nullable().default(null),

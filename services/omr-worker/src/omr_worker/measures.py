@@ -157,6 +157,50 @@ def check_measures(
     return issues
 
 
+@dataclass(frozen=True)
+class IssueDetails:
+    """Подробности о подозрительном такте, чтобы приложение могло объяснить ошибку словами.
+
+    Длины — в четвертях: «11 восьмых вместо 12» в 12/8 — length 5.5, expected_length 6."""
+
+    # Нотоносец без такта (с 1) — для missing_on_staff.
+    staff: int | None = None
+    # overflow — конец самого позднего события; duration_mismatch — длина неверного голоса.
+    length: float | None = None
+    # Длина такта по размеру.
+    expected_length: float | None = None
+
+
+def issue_details(
+    measures: list[Measure],
+    issues: dict[int, list[str]],
+    default_length: Fraction | None = None,
+) -> dict[int, IssueDetails]:
+    """Подробности для тактов, которые нашла check_measures (те же индексы)."""
+    details: dict[int, IssueDetails] = {}
+    for index, reasons in issues.items():
+        measure = measures[index]
+        expected = measure.expected_length or default_length
+        if "missing_on_staff" in reasons:
+            staff = next(i for i, v in enumerate(measure.voice_lengths) if v is None) + 1
+            details[index] = IssueDetails(staff=staff)
+        elif "overflow" in reasons and expected is not None:
+            details[index] = IssueDetails(length=float(measure.end),
+                                          expected_length=float(expected))
+        elif "duration_mismatch" in reasons and expected is not None:
+            lengths = [x for v in measure.voice_lengths for x in (v or []) if x and x != expected]
+            # Длиннее размера — главная ошибка; иначе самый короткий из неполных голосов.
+            longer = [x for x in lengths if x > expected]
+            wrong = max(longer) if longer else min(lengths, default=None)
+            details[index] = IssueDetails(
+                length=float(wrong) if wrong is not None else None,
+                expected_length=float(expected),
+            )
+        else:
+            details[index] = IssueDetails()
+    return details
+
+
 def _completes_pickup(measures: list[Measure], expected: Fraction, piece_start: bool) -> bool:
     """Последний такт может быть неполным, только если вместе с затактом он даёт целый такт.
 

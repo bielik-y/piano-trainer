@@ -25,16 +25,21 @@ from .timing import Meter, measures_with_meter
 MAX_BEATS = 12
 
 
-def apply_meter_changes(music_xml: str) -> tuple[str, int]:
-    """Возвращает MusicXML и число найденных смен размера."""
+MeterChange = tuple[int, int, int]  # индекс такта (с 0), доли, длительность доли
+
+
+def apply_meter_changes(music_xml: str) -> tuple[str, list[MeterChange]]:
+    """Возвращает MusicXML и найденные смены размера: такт, с которого действует другой размер.
+
+    Возврат к исходному размеру сменой не считается: «5/4 в такте 3» — одна смена."""
     root = ET.fromstring(music_xml.encode("utf-8"))
     parts = root.findall("part")
     if len(parts) != 1 or sum(1 for _ in root.iter("time")) != 1:
-        return music_xml, 0  # несколько партий или размер уже меняется — не трогаем
+        return music_xml, []  # несколько партий или размер уже меняется — не трогаем
 
     # Список строится до вставок, поэтому у всех тактов исходный размер пьесы.
     measures = list(measures_with_meter(root))
-    changes = 0
+    changes: list[MeterChange] = []
     current: Fraction | None = None
     for index, (measure, meter) in enumerate(measures):
         base = meter.length
@@ -47,7 +52,8 @@ def apply_meter_changes(music_xml: str) -> tuple[str, int]:
         if target != current:
             signature = _signature(target, meter) if target != base else None
             insert_time(measure, *(signature or (meter.beats, meter.beat_type)))
-            changes += target != base
+            if signature:
+                changes.append((index, *signature))
             current = target
         if target != base:
             _stretch_measure_rests(measure, target)

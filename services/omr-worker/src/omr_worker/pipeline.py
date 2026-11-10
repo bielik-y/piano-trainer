@@ -25,7 +25,13 @@ from .accidentals import add_accidentals
 from .beams import add_beams
 from .empty_staves import remove_empty_systems
 from .engines.cli import EngineCancelled, EngineError, EngineNoMusic, EngineTimeout
-from .measures import check_measures, infer_time_signature, measures_from_score, parse_score
+from .measures import (
+    check_measures,
+    infer_time_signature,
+    issue_details,
+    measures_from_score,
+    parse_score,
+)
 from .merge import (
     merge_pages,
     page_of_measure,
@@ -34,7 +40,7 @@ from .merge import (
     set_time_signature,
 )
 from .metadata import ScoreInfo, read_score_info
-from .meter import apply_meter_changes
+from .meter import MeterChange, apply_meter_changes
 from .models import (
     Cancelled,
     EngineInfo,
@@ -43,6 +49,7 @@ from .models import (
     Progress,
     Report,
     SuspiciousMeasure,
+    TimeSignatureChange,
 )
 from .preprocess import image_size, is_pdf, prepare_pages
 from .rerun import PageSource, map_systems, rerecognize
@@ -241,6 +248,7 @@ def run_pipeline(
         finished.music_xml, finished.score, finished.measures, finished.issues
     )
     time_signature_source = finished.time_signature_source
+    details = issue_details(measures, issues)
     ok_count = len(measures) - len(issues)
     ok_ratio = round(ok_count / len(measures), 4)
 
@@ -253,6 +261,15 @@ def run_pipeline(
         staff_count=len(score.parts),
         time_signature=_first_time_signature(score),
         time_signature_source=time_signature_source,
+        time_signature_changes=[
+            TimeSignatureChange(
+                index=index,
+                number=measures[index].number or str(index + 1),
+                time_signature=f"{beats}/{beat_type}",
+            )
+            for index, beats, beat_type in finished.meter_changes
+            if index < len(measures)
+        ],
         key_fifths=_first_key(score),
         title=info.title,
         composer=info.composer,
@@ -265,6 +282,9 @@ def run_pipeline(
                 number=measures[index].number or str(index + 1),
                 page=page_of_measure(per_page, index),
                 reasons=reasons,
+                staff=details[index].staff,
+                length=details[index].length,
+                expected_length=details[index].expected_length,
             )
             for index, reasons in sorted(issues.items())
         ],
@@ -290,6 +310,7 @@ class _Finished:
     measures: list
     issues: dict[int, list[str]]
     time_signature_source: str | None
+    meter_changes: list[MeterChange]
 
 
 def _postprocess(raw_xml: str, user_time: tuple[int, int] | None = None) -> _Finished:
@@ -298,6 +319,7 @@ def _postprocess(raw_xml: str, user_time: tuple[int, int] | None = None) -> _Fin
     user_time — размер от пользователя: заменяет найденный движком, а смены размера посреди
     пьесы не ищутся — пользователь сказал, какой размер у пьесы."""
     music_xml_text = raw_xml
+    meter_changes: list[MeterChange] = []
     if user_time is not None:
         music_xml_text = replace_time_signature(music_xml_text, *user_time)
         time_signature_source = "user"
@@ -309,12 +331,17 @@ def _postprocess(raw_xml: str, user_time: tuple[int, int] | None = None) -> _Fin
                 music_xml_text = set_time_signature(music_xml_text, *inferred)
                 time_signature_source = "inferred"
         # Сдвиг нот считается по длине такта, поэтому после размера; знаки — по верному времени.
-        music_xml_text, _ = apply_meter_changes(music_xml_text)
+        music_xml_text, meter_changes = apply_meter_changes(music_xml_text)
     music_xml_text = add_beams(add_accidentals(close_voice_gaps(music_xml_text)))
     score = parse_score(music_xml_text)
     measures = measures_from_score(score)
     return _Finished(
-        music_xml_text, score, measures, check_measures(measures), time_signature_source
+        music_xml_text,
+        score,
+        measures,
+        check_measures(measures),
+        time_signature_source,
+        meter_changes,
     )
 
 

@@ -52,6 +52,16 @@ class SuspiciousMeasure(Model):
     number: str  # номер такта в MusicXML
     page: int  # с 1
     reasons: list[str]
+    # Подробности (measures.IssueDetails): нотоносец без такта, длины в четвертях.
+    staff: int | None = None
+    length: float | None = None
+    expected_length: float | None = None
+
+
+class TimeSignatureChange(Model):
+    index: int  # такт (с 0), с которого действует размер
+    number: str  # номер такта в MusicXML
+    time_signature: str  # «5/4»
 
 
 class EngineInfo(Model):
@@ -70,6 +80,8 @@ class Report(Model):
     # engine — знак размера нашёл движок, inferred — вычислен по длинам тактов,
     # user — задан пользователем при загрузке (OmrJobOptions.timeSignature).
     time_signature_source: Literal["engine", "inferred", "user"] | None = None
+    # Смены размера посреди пьесы (meter.py); time_signature — размер в начале.
+    time_signature_changes: list[TimeSignatureChange] = []
     key_fifths: int | None = None
     title: str | None = None
     composer: str | None = None

@@ -43,7 +43,7 @@ def test_one_measure_in_five_four_like_bohemian_rhapsody():
 
     result, changes = apply_meter_changes(xml)
 
-    assert changes == 1
+    assert changes == [(2, 5, 4)]
     assert times(result) == [("1", "4/4"), ("3", "5/4"), ("4", "4/4")]
     rest = ET.fromstring(result).findall("part/measure")[2].find("note/rest/..")
     assert rest.findtext("duration") == "20" and rest.find("rest").get("measure") == "yes"
@@ -54,7 +54,7 @@ def test_section_in_three_four_returns_to_four_four():
     three = ([4, 4, 4], [12])
     xml = score(bar(1, *FULL), bar(2, *three), bar(3, *three), bar(4, *FULL), bar(5, *FULL))
     result, changes = apply_meter_changes(xml)
-    assert changes == 1
+    assert changes == [(1, 3, 4)]
     assert times(result) == [("1", "4/4"), ("2", "3/4"), ("4", "4/4")]
 
 
@@ -68,16 +68,16 @@ def test_lost_note_on_one_staff_is_not_a_meter_change():
     # Сверху потеряна восьмая (как такт 18 «TikTok 1.jpg»): нотоносцы расходятся.
     xml = score(bar(1, *FULL), bar(2, [2] * 7, [16]), bar(3, *FULL), bar(4, *FULL))
     result, changes = apply_meter_changes(xml)
-    assert changes == 0
+    assert changes == []
     assert times(result) == [("1", "4/4")]
 
 
 def test_odd_length_is_not_a_meter():
     # 17 шестнадцатых на обоих нотоносцах обычным размером не записать.
     xml = score(bar(1, *FULL), bar(2, [4, 4, 4, 4, 1], [16, 1]), bar(3, *FULL), bar(4, *FULL))
-    assert apply_meter_changes(xml)[1] == 0
+    assert apply_meter_changes(xml)[1] == []
 
 
 def test_first_and_last_measures_are_left_to_pickup_rules():
     xml = score(bar(1, [4, 4], [8]), bar(2, *FULL), bar(3, *FULL), bar(4, [4, 4], [8]))
-    assert apply_meter_changes(xml)[1] == 0
+    assert apply_meter_changes(xml)[1] == []
