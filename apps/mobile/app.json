@@ -6,7 +6,7 @@
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "pianotrainer",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/expo.icon",
       "supportsTablet": true,
@@ -27,9 +27,18 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#EEF1F7",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Piano Trainer открывает фото с нотами, чтобы распознать их и добавить в библиотеку.",
+          "cameraPermission": "Piano Trainer фотографирует ноты, чтобы распознать их и добавить в библиотеку.",
+          "microphonePermission": false
         }
       ]
     ],
@@ -37,9 +46,6 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "platforms": [
-      "ios",
-      "android"
-    ]
+    "platforms": ["ios", "android"]
   }
 }
