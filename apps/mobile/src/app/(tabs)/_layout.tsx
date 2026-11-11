@@ -1,40 +1,30 @@
-import { NativeTabs } from 'expo-router/native-tabs';
-import { useColorScheme } from 'react-native';
+import { Tabs } from 'expo-router/tabs';
 
-import { Colors } from '@/constants/theme';
+import { Dock } from '@/components/dock';
+import { AddSheetProvider, useOpenAddSheet } from '@/features/library/add-sheet';
+import { colors } from '@/theme/tokens';
+
+/** Приложение открывается на библиотеке. */
+export const unstable_settings = { initialRouteName: 'library' };
 
 export default function TabsLayout() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-
   return (
-    <NativeTabs
-      backgroundColor={colors.background}
-      indicatorColor={colors.backgroundElement}
-      labelStyle={{ selected: { color: colors.text } }}>
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Сегодня</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/home.png')}
-          renderingMode="template"
-        />
-      </NativeTabs.Trigger>
+    <AddSheetProvider>
+      <TabsWithDock />
+    </AddSheetProvider>
+  );
+}
 
-      <NativeTabs.Trigger name="library">
-        <NativeTabs.Trigger.Label>Библиотека</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/explore.png')}
-          renderingMode="template"
-        />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="profile">
-        <NativeTabs.Trigger.Label>Профиль</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/home.png')}
-          renderingMode="template"
-        />
-      </NativeTabs.Trigger>
-    </NativeTabs>
+function TabsWithDock() {
+  const openAddSheet = useOpenAddSheet();
+  return (
+    <Tabs
+      screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.bg } }}
+      tabBar={(props) => <Dock {...props} onAdd={openAddSheet} />}
+    >
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="library" />
+      <Tabs.Screen name="profile" />
+    </Tabs>
   );
 }
