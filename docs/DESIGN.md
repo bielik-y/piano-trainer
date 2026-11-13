@@ -1,6 +1,6 @@
 # Дизайн-система
 
-> Макеты: холст «Piano Trainer — Библиотека» (артефакт Claude): https://claude.ai/artifact/LNtCS7FhE6gayhYVp2S9ZA. Здесь — решения, по которым верстается приложение.
+> Макеты: холст «Piano Trainer — Библиотека» (артефакт Claude): https://claude.ai/artifact/Up7jH1drfbNNfxvpcqFzZK. Здесь — решения, по которым верстается приложение.
 > Описание идеи: [IDEA.md](./IDEA.md). Архитектура: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 Статус: черновик v0.1 (2026-11-08), спроектирован один экран — «Библиотека» со шторкой добавления и страницей произведения.
