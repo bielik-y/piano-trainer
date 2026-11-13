@@ -17,21 +17,30 @@ from .fixtures import bad_measure, good_measure, score
 
 
 class FakeEngine:
-    """Вместо homr: для каждой страницы по очереди отдаёт заранее заданный MusicXML."""
+    """Вместо homr: для каждой страницы по очереди отдаёт заранее заданный MusicXML.
+
+    `rotated` — результат для страницы, повёрнутой на 180° (номер страницы → MusicXML); без
+    него повёрнутая страница не распознаётся."""
 
     name = "fake"
 
-    def __init__(self, documents: list[str | None]) -> None:
+    def __init__(self, documents: list[str | None], rotated: dict[int, str] | None = None) -> None:
         self.documents = list(documents)
+        self.rotated = rotated or {}
         self.calls = 0
+        self.rotated_calls = 0
 
     def version(self) -> str | None:
         return "1.0"
 
     def recognize_page(self, image: Path, out_dir: Path,
                        should_stop: Callable[[], bool] | None = None) -> Path:
-        doc = self.documents[self.calls]
-        self.calls += 1
+        if image.stem.endswith("-r180"):
+            self.rotated_calls += 1
+            doc = self.rotated.get(int(image.stem.removesuffix("-r180")))
+        else:
+            doc = self.documents[self.calls]
+            self.calls += 1
         if doc is None:
             raise EngineError("fake: сбой")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -211,3 +220,47 @@ def test_interrupted_jobs_fail_on_start(tmp_path: Path):
     store.claim()
     assert store.fail_interrupted() == 1
     assert row(store, "j3")["error_code"] == "interrupted"
+
+
+def test_upside_down_page_is_recognized_rotated(tmp_path: Path):
+    # Страница 2 снята вверх ногами: как есть почти все такты неверны, повёрнутая — верна.
+    photos = [make_photo(tmp_path / f"{n}.jpg") for n in (1, 2)]
+    first = score(good_measure(1, time="4/4"), good_measure(2))
+    # homr пишет <divisions> на каждой странице, размер печатают только на первой.
+    divisions = "<attributes><divisions>4</divisions></attributes>"
+    upside_down = score(*(bad_measure(n) for n in range(3, 7))).replace(
+        '<measure number="3">', '<measure number="3">' + divisions)
+    upright = score(*(good_measure(n) for n in range(3, 7))).replace(
+        '<measure number="3">', '<measure number="3">' + divisions)
+    engine = FakeEngine([first, upside_down], rotated={2: upright})
+
+    output = run_pipeline(photos, tmp_path / "job", engine, min_ok_ratio=0.4)
+
+    assert engine.rotated_calls == 1
+    assert output.report.ok_measure_count == 6
+    assert not (tmp_path / "job" / "pages" / "2-r180.png").exists()
+
+
+def test_rotation_is_kept_only_when_it_helps(tmp_path: Path):
+    bad = score(good_measure(1, time="4/4"), bad_measure(2), bad_measure(3))
+    engine = FakeEngine([bad], rotated={1: bad})
+
+    output = run_pipeline([make_photo(tmp_path / "1.jpg")], tmp_path / "job", engine,
+                          min_ok_ratio=0.4)
+
+    assert engine.rotated_calls == 1
+    assert output.report.ok_measure_count == 1
+
+
+def test_good_page_is_not_rotated(tmp_path: Path):
+    engine = FakeEngine([score(good_measure(1, time="4/4"), good_measure(2), bad_measure(3))])
+    run_pipeline([make_photo(tmp_path / "1.jpg")], tmp_path / "job", engine, min_ok_ratio=0.4)
+    assert engine.rotated_calls == 0
+
+
+def test_pdf_page_is_never_rotated(tmp_path: Path):
+    pdf = make_pdf(tmp_path / "in.pdf", pages=1)
+    bad = score(good_measure(1, time="4/4"), bad_measure(2), bad_measure(3))
+    engine = FakeEngine([bad], rotated={1: score(good_measure(1, time="4/4"))})
+    run_pipeline([pdf], tmp_path / "job", engine, min_ok_ratio=0.4, dpi=50)
+    assert engine.rotated_calls == 0

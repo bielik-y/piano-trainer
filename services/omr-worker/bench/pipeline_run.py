@@ -19,6 +19,7 @@ import json
 import logging
 import re
 import shutil
+import sys
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -182,7 +183,8 @@ def main() -> None:
     parser.add_argument("--only", default="*", help="glob по id пьесы через запятую")
     parser.add_argument("--compare", help="метка прошлого замера для сравнения")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.WARNING)
+    logging.basicConfig(level=logging.ERROR)
+    sys.stdout.reconfigure(encoding="utf-8")  # консоль Windows по умолчанию в cp1251
 
     manifest = yaml.safe_load((BENCH / "dataset.yaml").read_text(encoding="utf-8"))
     items = [

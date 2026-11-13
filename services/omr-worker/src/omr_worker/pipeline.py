@@ -14,12 +14,16 @@ import logging
 import re
 import shutil
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Protocol
+from xml.etree import ElementTree as ET
 
 import music21 as m21
+from PIL import Image
 
 from .accidentals import add_accidentals
 from .beams import add_beams
@@ -39,6 +43,7 @@ from .merge import (
     set_score_info,
     set_time_signature,
 )
+from .hands import split_hands
 from .metadata import ScoreInfo, read_score_info
 from .meter import MeterChange, apply_meter_changes
 from .models import (
@@ -53,6 +58,7 @@ from .models import (
 )
 from .preprocess import image_size, is_pdf, prepare_pages
 from .rerun import PageSource, map_systems, rerecognize
+from .ties import slurs_to_ties
 from .timing import close_voice_gaps
 
 log = logging.getLogger(__name__)
@@ -63,6 +69,8 @@ RECOGNIZE_END = 90
 MERGE_END = 95
 # Оценка времени на страницу до первой распознанной (по бенчмарку ~30–50 с).
 DEFAULT_PAGE_SECONDS = 40
+# Доля подозрительных тактов страницы, при которой пробуем распознать её повёрнутой на 180°.
+UPSIDE_DOWN_SHARE = 0.4
 
 
 class PageEngine(Protocol):
@@ -124,6 +132,7 @@ def run_pipeline(
     if pages_dir.exists():
         shutil.rmtree(pages_dir)
     images = prepare_pages(sources, pages_dir, dpi, max_pdf_pages)
+    from_pdf = len(sources) == 1 and is_pdf(sources[0])
     pages: list[PageInfo] = []
     blank_pages: set[int] = set()
     for index, image in enumerate(images, start=1):
@@ -165,7 +174,15 @@ def run_pipeline(
         started = time.monotonic()
         try:
             output = engine.recognize_page(image, work, should_stop=listener.should_stop)
-            documents.append(_read_text(output))
+            text = _read_text(output)
+            # Вверх ногами бывают только фото: PDF из нотного редактора всегда стоит ровно.
+            flipped = None if from_pdf else _try_upside_down(
+                engine, image, text, work, listener, _known_signature(documents), time_signature
+            )
+            if flipped is not None:
+                log.info("Страница %d снята вверх ногами: распознана повёрнутой", page.index)
+                output, text = flipped
+            documents.append(text)
             outputs.append(output)
             page.status = "done"
         except EngineCancelled:
@@ -259,7 +276,7 @@ def run_pipeline(
         min_ok_ratio=min_ok_ratio,
         quality="ok" if ok_ratio >= min_ok_ratio else "low",
         staff_count=len(score.parts),
-        time_signature=_first_time_signature(score),
+        time_signature=_main_time_signature(score),
         time_signature_source=time_signature_source,
         time_signature_changes=[
             TimeSignatureChange(
@@ -270,7 +287,7 @@ def run_pipeline(
             for index, beats, beat_type in finished.meter_changes
             if index < len(measures)
         ],
-        key_fifths=_first_key(score),
+        key_fifths=_main_key(score),
         title=info.title,
         composer=info.composer,
         tempo_text=info.tempo_text,
@@ -330,9 +347,20 @@ def _postprocess(raw_xml: str, user_time: tuple[int, int] | None = None) -> _Fin
             if inferred is not None:
                 music_xml_text = set_time_signature(music_xml_text, *inferred)
                 time_signature_source = "inferred"
+    # Руки разводятся по длине такта, поэтому после размера, и до поиска смен размера: иначе
+    # такт со слитыми руками принимается за 6/4.
+    music_xml_text = split_hands(music_xml_text)
+    if time_signature_source == "engine":
+        corrected = _correct_engine_meter(music_xml_text)
+        if corrected is not None:
+            music_xml_text = split_hands(corrected)
+            time_signature_source = "inferred"
+    if user_time is None:
         # Сдвиг нот считается по длине такта, поэтому после размера; знаки — по верному времени.
         music_xml_text, meter_changes = apply_meter_changes(music_xml_text)
-    music_xml_text = add_beams(add_accidentals(close_voice_gaps(music_xml_text)))
+    # Залиговки ищутся по верному времени нот; знак на продолжении залиговки не ставится.
+    music_xml_text = close_voice_gaps(music_xml_text)
+    music_xml_text = add_beams(add_accidentals(slurs_to_ties(music_xml_text)))
     score = parse_score(music_xml_text)
     measures = measures_from_score(score)
     return _Finished(
@@ -343,6 +371,104 @@ def _postprocess(raw_xml: str, user_time: tuple[int, int] | None = None) -> _Fin
         time_signature_source,
         meter_changes,
     )
+
+
+def _page_issue_share(
+    music_xml: str,
+    signature: tuple[int, int] | None,
+    user_time: tuple[int, int] | None,
+) -> float:
+    """Доля подозрительных тактов страницы после той же постобработки, что и у всей пьесы:
+    сырой результат homr на фото почти весь «вылезает» из тактов (общий курсор рук), и по нему
+    плохую страницу от хорошей не отличить. Размер печатают только в начале пьесы, поэтому
+    странице без него ставится размер прошлых страниц."""
+    try:
+        if signature is not None and not _has_time_signature(music_xml):
+            music_xml = set_time_signature(music_xml, *signature)
+        finished = _postprocess(music_xml, user_time)
+    except Exception:
+        return 1.0
+    if not finished.measures:
+        return 0.0
+    return len(finished.issues) / len(finished.measures)
+
+
+def _known_signature(documents: list[str | None]) -> tuple[int, int] | None:
+    """Размер с уже распознанных страниц."""
+    for doc in documents:
+        if doc is None:
+            continue
+        match = re.search(r"<beats>(\d+)</beats>\s*<beat-type>(\d+)</beat-type>", doc)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def _try_upside_down(
+    engine: "PageEngine",
+    image: Path,
+    text: str,
+    work: Path,
+    listener: "Listener",
+    signature: tuple[int, int] | None,
+    user_time: tuple[int, int] | None,
+) -> tuple[Path, str] | None:
+    """Страница, где подозрительна большая часть тактов, распознаётся ещё раз повёрнутой на 180°:
+    фото бывает снято вверх ногами (страницы 2 и 4 «You've Got a Friend in Me»), и EXIF этого
+    не знает. Повёрнутый вариант принимается, только если тактов с ошибками в нём хотя бы
+    вдвое меньше и сам он ниже порога: перевёрнутые ноты иногда случайно складываются в такты.
+    Тогда картинка страницы заменяется повёрнутой — по ней дальше режутся строки и читается
+    текст."""
+    share = _page_issue_share(text, signature, user_time)
+    if share < UPSIDE_DOWN_SHARE:
+        return None
+    rotated = image.with_name(f"{image.stem}-r180{image.suffix}")
+    with Image.open(image) as picture:
+        picture.rotate(180).save(rotated)
+    try:
+        output = engine.recognize_page(rotated, work, should_stop=listener.should_stop)
+    except EngineCancelled:
+        raise
+    except EngineError:
+        rotated.unlink(missing_ok=True)
+        return None
+    rotated_text = _read_text(output)
+    rotated_share = _page_issue_share(rotated_text, signature, user_time)
+    if rotated_share * 2 > share or rotated_share >= UPSIDE_DOWN_SHARE:
+        rotated.unlink(missing_ok=True)
+        return None
+    rotated.replace(image)
+    return output, rotated_text
+
+
+def _correct_engine_meter(music_xml: str) -> str | None:
+    """Размер по сумме длительностей в голосах вместо верхней цифры от homr; None — не нужно.
+
+    homr читает только нижнюю цифру размера, а верхнюю берёт как медиану длин тактов. Длину
+    такта он считает по общему курсору обеих рук, поэтому на фото, где нота одной руки
+    вступает на фоне длинной ноты другой, такты вытягиваются, и 4/4 становится 5/4. Сумма
+    длительностей голоса этих дырок не видит. Нижняя цифра остаётся от homr, если с ней
+    получается целое число долей (6/8 не превращается в 3/4)."""
+    root = ET.fromstring(music_xml.encode("utf-8"))
+    # homr ставит размер на каждой странице свой (медиана её тактов), поэтому их может быть
+    # несколько: 5/4 на первой странице и 2/2 на последней.
+    times = list(root.iter("time"))
+    if not times:
+        return None
+    inferred = infer_time_signature(measures_from_score(parse_score(music_xml)))
+    if inferred is None:
+        return None
+    length = Fraction(inferred[0] * 4, inferred[1])  # в четвертях
+    if all(
+        Fraction(int(t.findtext("beats")) * 4, int(t.findtext("beat-type"))) == length
+        for t in times
+    ):
+        return None
+    beat_type = int(times[0].findtext("beat-type"))
+    beats = length * beat_type / 4
+    signature = (int(beats), beat_type) if beats.denominator == 1 else inferred
+    log.info("Размер от движка заменён на %d/%d по длинам голосов", *signature)
+    return replace_time_signature(music_xml, *signature)
 
 
 def _has_time_signature(music_xml: str) -> bool:
@@ -382,11 +508,25 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _first_time_signature(score: m21.stream.Score) -> str | None:
-    found = next(iter(score.recurse().getElementsByClass(m21.meter.TimeSignature)), None)
-    return found.ratioString if found is not None else None
+def _main_time_signature(score: m21.stream.Score) -> str | None:
+    """Размер, действующий в большинстве тактов, а не первый найденный: первым бывает
+    лишний нотоносец над нотами или короткая смена размера."""
+    return _most_common(score, m21.meter.TimeSignature, lambda ts: ts.ratioString)
 
 
-def _first_key(score: m21.stream.Score) -> int | None:
-    found = next(iter(score.recurse().getElementsByClass(m21.key.KeySignature)), None)
-    return found.sharps if found is not None else None
+def _main_key(score: m21.stream.Score) -> int | None:
+    """Тональность большинства тактов (ключевые знаки первой строки бывают прочитаны неверно)."""
+    return _most_common(score, m21.key.KeySignature, lambda key: key.sharps)
+
+
+def _most_common(score: m21.stream.Score, cls: type, value: Callable) -> object | None:
+    counts: Counter = Counter()
+    for part in score.parts:
+        current = None
+        for measure in part.getElementsByClass(m21.stream.Measure):
+            found = next(iter(measure.getElementsByClass(cls)), None)
+            if found is not None:
+                current = value(found)
+            if current is not None:
+                counts[current] += 1
+    return counts.most_common(1)[0][0] if counts else None

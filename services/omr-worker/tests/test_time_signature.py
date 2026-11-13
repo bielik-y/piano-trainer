@@ -109,10 +109,14 @@ def test_pipeline_keeps_time_signature_found_by_engine(tmp_path: Path):
     first = measure(1, [("C5", 8), ("E5", 8)], [("C3", 16)], time="4/4")
     engine = FakeEngine([score(first, in_three(2), in_three(3), in_three(4), in_three(5))])
 
-    report = run_pipeline([pdf], tmp_path / "job", engine, min_ok_ratio=0.4, dpi=50).report
+    output = run_pipeline([pdf], tmp_path / "job", engine, min_ok_ratio=0.4, dpi=50)
 
-    assert report.time_signature == "4/4"
+    report = output.report
     assert report.time_signature_source == "engine"
+    assert "<beats>4</beats>" in output.music_xml.read_text(encoding="utf-8")
+    # В отчёте — размер большинства тактов: 4/4 только в первом, дальше смена на 3/4.
+    assert report.time_signature == "3/4"
+    assert [c.time_signature for c in report.time_signature_changes] == ["3/4"]
 
 
 def test_pipeline_leaves_unknown_when_not_enough_measures(tmp_path: Path):
@@ -167,3 +171,62 @@ def test_pipeline_uses_user_time_signature(tmp_path: Path):
     music_xml = output.music_xml.read_text(encoding="utf-8")
     assert music_xml.count("<time>") == 1
     assert "<beats>3</beats>" in music_xml
+
+
+def shifted(number: int, time: str | None = None) -> str:
+    """Такт 4/4, записанный по общему курсору, как homr на фото: внутри левой руки дырка в
+    четверть, такт «вылезает» до 5/4. Сумма длительностей каждого голоса — 4/4."""
+    head = ""
+    if time:
+        beats, beat_type = time.split("/")
+        head = (
+            "<attributes><divisions>4</divisions><key><fifths>0</fifths></key>"
+            f"<time><beats>{beats}</beats><beat-type>{beat_type}</beat-type></time>"
+            "<staves>2</staves></attributes>"
+        )
+    rh = "".join(
+        f"<note><pitch><step>{s}</step><octave>5</octave></pitch><duration>4</duration>"
+        f"<voice>1</voice><type>quarter</type><staff>1</staff></note>"
+        for s in "CDEF"
+    )
+    def lh_note(step: str, duration: int, kind: str) -> str:
+        return (
+            f"<note><pitch><step>{step}</step><octave>3</octave></pitch>"
+            f"<duration>{duration}</duration><voice>5</voice><type>{kind}</type>"
+            "<staff>2</staff></note>"
+        )
+
+    # До — четверть, соль — половинная (должна вступить на 2-й доле, а стоит на 3-й), до — четверть.
+    lh = (
+        "<backup><duration>16</duration></backup>"
+        + lh_note("C", 4, "quarter")
+        + "<forward><duration>4</duration></forward>"
+        + lh_note("G", 8, "half")
+        + lh_note("C", 4, "quarter")
+    )
+    return f'<measure number="{number}">{head}{rh}{lh}</measure>'
+
+
+def test_engine_meter_from_shifted_measures_is_corrected(tmp_path: Path):
+    # Фото «You've Got a Friend in Me» после очистки: homr связал станы, но по общему курсору
+    # такты вытянулись, и верхнюю цифру он взял медианой — 5/4.
+    pdf = make_pdf(tmp_path / "in.pdf", pages=1)
+    measures = [shifted(1, "5/4")] + [shifted(n) for n in range(2, 7)]
+    engine = FakeEngine([score(*measures)])
+
+    report = run_pipeline([pdf], tmp_path / "job", engine, min_ok_ratio=0.4, dpi=50).report
+
+    assert report.time_signature == "4/4"
+    assert report.time_signature_source == "inferred"
+    assert report.ok_measure_count == 6
+
+
+def test_engine_meter_that_matches_voices_stays(tmp_path: Path):
+    pdf = make_pdf(tmp_path / "in.pdf", pages=1)
+    measures = [measure(1, [("C5", 8), ("E5", 8)], [("C3", 16)], time="4/4")]
+    measures += [in_four(n) for n in range(2, 6)]
+    engine = FakeEngine([score(*measures)])
+
+    report = run_pipeline([pdf], tmp_path / "job", engine, min_ok_ratio=0.4, dpi=50).report
+
+    assert (report.time_signature, report.time_signature_source) == ("4/4", "engine")
