@@ -1,6 +1,7 @@
 # Набор для бенчмарка движков OMR. Сами файлы лежат в bench/data/ (не в git).
 #
-# source — путь относительно bench/data/. PDF разворачивается в отдельные страницы (<id>-p<N>),
+# source — путь относительно bench/data/; sources — список фото одной пьесы (страница на фото).
+# PDF разворачивается в отдельные страницы (<id>-p<N>),
 #          skip_pages — страницы, которые не участвуют (например, пустые нотоносцы).
 # truth:
 #   reference: <имя> — точный эталон bench/data/reference/<имя>.musicxml;
@@ -60,6 +61,14 @@ items:
     source: user/Bohemian Rapsody 2.jpg
     truth: manual
     notes: фото бумаги, 960×1280 (сжато мессенджером)
+  - id: friend-in-me-photos
+    kind: photo
+    sources: [user/friend-in-me-photos/01.heic, user/friend-in-me-photos/02.heic,
+              user/friend-in-me-photos/03.heic, user/friend-in-me-photos/04.heic,
+              user/friend-in-me-photos/05.heic]
+    truth: manual
+    notes: 5 фото бумаги с iPhone (HEIC 4032×3024), You've Got a Friend in Me, Es-dur 4/4;
+      просвечивает обратная сторона листа, тень на первой странице
   - id: tiktok-1
     kind: photo
     source: user/TikTok 1.jpg

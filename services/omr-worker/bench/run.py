@@ -23,6 +23,7 @@ import pymupdf
 import yaml
 
 from omr_worker.engines.cli import AudiverisEngine, CliEngine, HomrEngine, OemerEngine
+from omr_worker.preprocess import normalize_image
 
 BENCH = Path(__file__).parent
 DATA = BENCH / "data"
@@ -61,6 +62,18 @@ def load_pages() -> list[Page]:
     inputs.mkdir(parents=True, exist_ok=True)
     pages: list[Page] = []
     for item in manifest["items"]:
+        if "sources" in item:
+            # Пьеса из нескольких фото: страница — одно фото, приводится к PNG как в воркере.
+            count = len(item["sources"])
+            for page_no, name in enumerate(item["sources"], start=1):
+                image = inputs / f"{item['id']}-p{page_no}.png"
+                if not image.exists():
+                    normalize_image(DATA / name, image)
+                page_id = f"{item['id']}-p{page_no}"
+                pages.append(
+                    Page(page_id, item["id"], item["kind"], image, item["truth"], page_no, count)
+                )
+            continue
         source = DATA / item["source"]
         if source.suffix.lower() == ".pdf":
             doc = pymupdf.open(source)

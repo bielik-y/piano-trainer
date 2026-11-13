@@ -149,9 +149,13 @@ def compare(
     piece_start: bool = True,
     piece_end: bool = True,
     default_length: Fraction | None = None,
+    flagged_result: set[int] | None = None,
 ) -> PageResult:
-    """Сравнивает такты страницы. `gt` — такты эталона именно этой страницы."""
-    flagged_result = flag_measures(result, piece_start, piece_end, default_length)
+    """Сравнивает такты страницы. `gt` — такты эталона именно этой страницы.
+
+    `flagged_result` — такты, уже помеченные конвейером воркера; без него проверка считается здесь."""
+    if flagged_result is None:
+        flagged_result = flag_measures(result, piece_start, piece_end, default_length)
     correct = flagged = silent = extra = tie_only = 0
     for gi, rj in align(gt, result):
         if gi is None:
