@@ -31,6 +31,28 @@ def test_title_composer_and_tempo_word():
     assert info == ScoreInfo("JUST THE TWO OF US", "Bill Withers", "Moderately", None)
 
 
+def test_ocr_garbage_is_not_tempo():
+    # Фото «You've Got a Friend in Me»: OCR прочитал «DJS» слева над первой строкой.
+    info = classify_lines(
+        [
+            line("YOU'VE GOT A FRIEND IN ME", 0.37, 0.63, 0.065, 0.028),
+            line("DJS", 0.08, 0.12, 0.20),
+            line("Easy Shuffle", 0.11, 0.22, 0.229),
+        ],
+        staff_top=0.3,
+    )
+    assert info.tempo_text == "Easy Shuffle"
+
+
+def test_tempo_words():
+    for text in ("Allegro con brio", "Slow Rock", "Tenderly", "Medium Swing", "Умеренно"):
+        info = classify_lines([line(text, 0.06, 0.2, 0.2)], staff_top=0.3)
+        assert info.tempo_text == text, text
+    for text in ("DJS", "Arr. Smith", "Intro"):
+        info = classify_lines([line(text, 0.06, 0.2, 0.2)], staff_top=0.3)
+        assert info.tempo_text is None, text
+
+
 def test_arranger_is_not_composer_and_subtitle_is():
     # Раскладка «Champange Coast»: автор по центру под названием, справа аранжировщик.
     info = classify_lines(

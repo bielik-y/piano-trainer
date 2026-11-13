@@ -34,6 +34,22 @@ COMPOSER_PREFIX = re.compile(
 )
 NOT_COMPOSER = re.compile(r"\b(?:arr|arrang\w*|lyrics?|transcri\w*|from|for|op|no)\b", re.IGNORECASE)
 NOT_TEMPO = re.compile(r"^(?:piano|pianoforte|voice|vocals?|cresc\w*|dim\w*|legato)\.?$", re.IGNORECASE)
+# Текст темпа должен содержать слово из словаря или английское наречие на -ly («Tenderly»):
+# иначе это мусор OCR («DJS») или подпись.
+TEMPO_WORDS = re.compile(
+    r"\b(?:"
+    r"grave|largo|larghetto|lento|adagio\w*|andant\w*|moderato|allegr\w*|vivace|vivo|presto|"
+    r"prestissimo|tempo|rubato|maestoso|cantabile|dolce|grazioso|animato|agitato|sostenuto|"
+    r"tranquillo|espressivo|giocoso|scherzando|marcato|assai|molto|poco|non\s+troppo|"
+    r"slow\w*|moderate\w*|medium|fast|quick\w*|bright\w*|easy|steady|gentl\w*|freely|lively|"
+    r"relaxed|walking|swing\w*|shuffle|rock|ballad|waltz|march|groove|latin|bossa|samba|"
+    r"reggae|funk\w*|blues|pop|feel|straight|half[- ]time|"
+    r"langsam|mäßig|massig|schnell|ruhig|lebhaft|bewegt|lent|modéré|vif|"
+    r"медленно|умеренно|быстро|спокойно|оживл\w*"
+    r"|[a-z]{3,}ly"
+    r")\b",
+    re.IGNORECASE,
+)
 CHORD = re.compile(r"^[A-G][b#]?(?:maj|min|m|dim|aug|sus|add)?\d*$")
 BPM_AFTER_EQUALS = re.compile(r"=\s*(\d{2,3})\b")
 # OCR настроен на китайский и латиницу: ноты он порой читает как иероглифы.
@@ -163,6 +179,7 @@ def _find_tempo_text(lines: list[TextLine]) -> str | None:
             and not any(ch.isdigit() for ch in text)
             and not CHORD.match(text)
             and not NOT_TEMPO.match(text)
+            and TEMPO_WORDS.search(text)
         ):
             return text
     return None
