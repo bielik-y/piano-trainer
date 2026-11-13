@@ -5,7 +5,7 @@ import { AddSheetProvider, useOpenAddSheet } from '@/features/library/add-sheet'
 import { colors } from '@/theme/tokens';
 
 /** Приложение открывается на библиотеке. */
-export const unstable_settings = { initialRouteName: 'library' };
+export const unstable_settings = { anchor: 'library' };
 
 export default function TabsLayout() {
   return (
@@ -19,6 +19,7 @@ function TabsWithDock() {
   const openAddSheet = useOpenAddSheet();
   return (
     <Tabs
+      backBehavior="initialRoute"
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.bg } }}
       tabBar={(props) => <Dock {...props} onAdd={openAddSheet} />}
     >
