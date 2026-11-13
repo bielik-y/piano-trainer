@@ -81,3 +81,24 @@ def test_odd_length_is_not_a_meter():
 def test_first_and_last_measures_are_left_to_pickup_rules():
     xml = score(bar(1, [4, 4], [8]), bar(2, *FULL), bar(3, *FULL), bar(4, [4, 4], [8]))
     assert apply_meter_changes(xml)[1] == []
+
+
+def test_single_short_measure_is_not_a_meter_change():
+    # Такт 34 «You've Got a Friend in Me» с фото: оба нотоносца по четверти — потеряны ноты.
+    xml = score(bar(1, *FULL), bar(2, *FULL), bar(3, [4], [4]), bar(4, *FULL), bar(5, *FULL))
+    assert apply_meter_changes(xml)[1] == []
+
+
+def test_short_measure_before_double_barline_is_a_meter_change():
+    short = bar(3, [4], [4]).replace(
+        "</measure>", '<barline location="right"><bar-style>light-light</bar-style></barline></measure>'
+    )
+    xml = score(bar(1, *FULL), bar(2, *FULL), short, bar(4, *FULL), bar(5, *FULL))
+    assert apply_meter_changes(xml)[1] == [(2, 1, 4)]
+
+
+def test_piano_measure_on_one_staff_is_not_a_meter_change():
+    # Руки слиты на верхнем нотоносце (фото, homr не связал станы): такт 6/4, но это не размер.
+    merged = bar(2, [4] * 6, [])
+    xml = score(bar(1, *FULL), merged, bar(3, *FULL), bar(4, *FULL))
+    assert apply_meter_changes(xml)[1] == []

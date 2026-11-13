@@ -8,7 +8,11 @@ homr распознаёт только нижнюю цифру размера, �
 - на каждом нотоносце есть голос ровно этой длины — или нотоносец целиком из одной паузы
   (целотактовую паузу homr пишет целой нотой, её длина подгоняется под такт);
 - на нотоносцах есть и ноты, не только паузы;
-- длина записывается обычным размером: целое число четвертей или восьмых, не больше 12 долей.
+- длина записывается обычным размером: целое число четвертей или восьмых, не больше 12 долей;
+- в фортепианной партии такт есть на обоих нотоносцах (на одном — это слитые руки);
+- такт короче половины исходного размера принимается, только если за ним двойная черта или
+  повтор либо соседний такт той же длины: одиночный такт в одну долю — обычно потерянные ноты
+  («1/4» посреди «You've Got a Friend in Me»).
 
 Обычная ошибка распознавания (потерянная нота на одном нотоносце) этим условиям не отвечает:
 длины нотоносцев расходятся. После такта в другом размере исходный размер восстанавливается,
@@ -19,6 +23,7 @@ homr распознаёт только нижнюю цифру размера, �
 from fractions import Fraction
 from xml.etree import ElementTree as ET
 
+from .hands import is_piano
 from .merge import insert_time
 from .timing import Meter, measures_with_meter
 
@@ -39,16 +44,27 @@ def apply_meter_changes(music_xml: str) -> tuple[str, list[MeterChange]]:
 
     # Список строится до вставок, поэтому у всех тактов исходный размер пьесы.
     measures = list(measures_with_meter(root))
+    piano = is_piano(parts[0])
+    lengths = [_complete_length(measure, piano) for measure, _ in measures]
     changes: list[MeterChange] = []
     current: Fraction | None = None
     for index, (measure, meter) in enumerate(measures):
         base = meter.length
         current = current or base
         target = base
-        if 0 < index < len(measures) - 1:
-            length = _complete_length(measure)
-            if length is not None and length != base and _signature(length, meter):
-                target = length
+        length = lengths[index]
+        if (
+            0 < index < len(measures) - 1
+            and length is not None
+            and length != base
+            and _signature(length, meter)
+            and (
+                length * 2 >= base
+                or _ends_section(measure)
+                or length in (lengths[index - 1], lengths[index + 1])
+            )
+        ):
+            target = length
         if target != current:
             signature = _signature(target, meter) if target != base else None
             insert_time(measure, *(signature or (meter.beats, meter.beat_type)))
@@ -60,8 +76,24 @@ def apply_meter_changes(music_xml: str) -> tuple[str, list[MeterChange]]:
     return ET.tostring(root, encoding="unicode", xml_declaration=True), changes
 
 
-def _complete_length(measure: ET.Element) -> Fraction | None:
-    """Длина, которую одинаково заполняют все нотоносцы такта; None — заполняют по-разному."""
+def _ends_section(measure: ET.Element) -> bool:
+    """Такт заканчивается двойной чертой или повтором: короткий такт перед ней — часть
+    формы (вольта, конец раздела), а не потерянная нота."""
+    for barline in measure.findall("barline"):
+        if barline.get("location", "right") != "right":
+            continue
+        if barline.find("repeat") is not None:
+            return True
+        if barline.findtext("bar-style") in ("light-light", "light-heavy", "heavy-light"):
+            return True
+    return False
+
+
+def _complete_length(measure: ET.Element, piano: bool = False) -> Fraction | None:
+    """Длина, которую одинаково заполняют все нотоносцы такта; None — заполняют по-разному.
+
+    В фортепианной партии такт должен быть на обоих нотоносцах: такт только на одном —
+    это слитые руки или потерянный нотоносец, а не другой размер."""
     staves: dict[str, dict[str, Fraction]] = {}
     rests_only: dict[str, bool] = {}
     for note in measure.findall("note"):
@@ -73,6 +105,8 @@ def _complete_length(measure: ET.Element) -> Fraction | None:
         voice = note.findtext("voice") or "1"
         voices[voice] = voices.get(voice, Fraction(0)) + int(note.findtext("duration") or 0)
 
+    if piano and set(staves) != {"1", "2"}:
+        return None
     with_notes = [staff for staff in staves if not rests_only[staff]]
     if not with_notes:
         return None
