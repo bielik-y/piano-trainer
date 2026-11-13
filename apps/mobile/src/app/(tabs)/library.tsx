@@ -10,6 +10,7 @@ import { requestErrorText } from '@/features/library/errors';
 import { PieceCard } from '@/features/library/piece-card';
 import { useLibrary } from '@/features/library/queries';
 import { piecesCountText } from '@/features/library/text';
+import { apiBaseUrl } from '@/services/api/config';
 import { colors, type } from '@/theme/tokens';
 
 /** Экран библиотеки (артборд LightMain). */
@@ -36,6 +37,7 @@ export default function LibraryScreen() {
       <Text style={styles.emptyText}>
         Проверьте, что сервер запущен и телефон в той же сети, и потяните список вниз.
       </Text>
+      {__DEV__ ? <Text style={styles.emptyText}>{apiBaseUrl()}</Text> : null}
     </View>
   ) : (
     <View style={styles.empty}>

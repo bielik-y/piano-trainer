@@ -38,10 +38,37 @@ function deviceToken(): Promise<string> {
   return tokenPromise;
 }
 
+/**
+ * multipart-запрос через XMLHttpRequest: fetch в Expo SDK 58 не принимает части формы
+ * вида { uri, name, type } («Unsupported FormDataPart implementation»), а XHR React Native
+ * читает файл по uri сам.
+ */
+function xhrForm(url: string, init: RequestInit): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(init.method ?? 'POST', url);
+    for (const [name, value] of Object.entries((init.headers ?? {}) as Record<string, string>)) {
+      xhr.setRequestHeader(name, value);
+    }
+    xhr.onload = () =>
+      resolve(
+        new Response(xhr.responseText, {
+          status: xhr.status,
+          headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') ?? 'application/json' },
+        }),
+      );
+    xhr.onerror = () => reject(new Error(`XHR ${xhr.status}`));
+    xhr.ontimeout = () => reject(new Error('XHR timeout'));
+    xhr.send(init.body as FormData);
+  });
+}
+
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
+  const url = apiBaseUrl() + path;
   try {
-    return await fetch(apiBaseUrl() + path, init);
-  } catch {
+    return await (init.body instanceof FormData ? xhrForm(url, init) : fetch(url, init));
+  } catch (e) {
+    if (__DEV__) console.warn(`[api] ${init.method ?? 'GET'} ${url}: ${String(e)}`);
     throw new RequestError('network', 'Нет связи с сервером');
   }
 }
@@ -95,7 +122,7 @@ export async function apiSend(path: string, init: { method: string; body?: unkno
   });
 }
 
-/** multipart/form-data: Content-Type с boundary ставит сам fetch. */
+/** multipart/form-data: Content-Type с boundary ставит сам XHR. */
 export async function apiForm<T>(schema: Schema<T>, path: string, form: FormData): Promise<T> {
   const res = await authorized(path, { method: 'POST', body: form });
   return schema.parse(await res.json());
